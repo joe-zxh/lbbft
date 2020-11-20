@@ -8,8 +8,8 @@ import (
 )
 
 func PP2Proto(dpp *data.PrePrepareArgs) *PrePrepareArgs {
-	commands := make([]*Command, 0, len(dpp.Commands))
-	for _, cmd := range dpp.Commands {
+	commands := make([]*Command, 0, len(*dpp.Commands))
+	for _, cmd := range *dpp.Commands {
 		commands = append(commands, CommandToProto(cmd))
 	}
 	return &PrePrepareArgs{
@@ -27,9 +27,27 @@ func (pp *PrePrepareArgs) Proto2PP() *data.PrePrepareArgs {
 	dpp := &data.PrePrepareArgs{
 		View:     pp.View,
 		Seq:      pp.Seq,
-		Commands: commands,
+		Commands: &commands,
 	}
 	return dpp
+}
+
+func (pO *OrderingArgs) GetDataCommands() *[]data.Command {
+	commands := make([]data.Command, 0, len(pO.GetCommands()))
+	for _, cmd := range pO.GetCommands() {
+		commands = append(commands, cmd.Proto2Command())
+	}
+	return &commands
+}
+
+func Commands2OrderingArgs(cmds *[]data.Command) *OrderingArgs {
+	commands := make([]*Command, 0, len(*cmds))
+	for _, cmd := range *cmds {
+		commands = append(commands, CommandToProto(cmd))
+	}
+	return &OrderingArgs{
+		Commands: commands,
+	}
 }
 
 func CommandToProto(cmd data.Command) *Command {
@@ -66,7 +84,7 @@ func QuorumCertToProto(qc *data.QuorumCert) *QuorumCert {
 		sigs = append(sigs, PartialSig2Proto(&psig))
 	}
 	return &QuorumCert{
-		Sigs: sigs,
+		Sigs:       sigs,
 		SigContent: qc.SigContent[:],
 	}
 }

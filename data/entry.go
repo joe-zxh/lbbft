@@ -36,9 +36,10 @@ type Entry struct {
 	CommittedCert *QuorumCert // SigContent是CommitHash
 	Committed     bool
 
-	Digest      *EntryHash
-	PrepareHash *EntryHash // 签名内容：hash("prepare"+Digest)
-	CommitHash  *EntryHash // 签名内容: hash(“commit”+PrepareHash) // 因为有些节点先收到P再收到PP，没有Digest，所以用的是PrepareHash
+	PreEntryHash *EntryHash
+	Digest       *EntryHash
+	PrepareHash  *EntryHash // 签名内容：hash("prepare"+Digest)
+	CommitHash   *EntryHash // 签名内容: hash(“commit”+PrepareHash) // 因为有些节点先收到P再收到PP，没有Digest，所以用的是PrepareHash
 }
 
 //type Entry struct {
@@ -69,6 +70,8 @@ func (e *Entry) GetDigest() EntryHash {
 
 	s512 := sha512.New()
 
+	s512.Write(e.PreEntryHash.ToSlice())
+
 	byte4 := make([]byte, 4)
 	binary.LittleEndian.PutUint32(byte4, uint32(e.PP.View))
 	s512.Write(byte4[:])
@@ -76,7 +79,7 @@ func (e *Entry) GetDigest() EntryHash {
 	binary.LittleEndian.PutUint32(byte4, uint32(e.PP.Seq))
 	s512.Write(byte4[:])
 
-	for _, cmd := range e.PP.Commands {
+	for _, cmd := range *e.PP.Commands {
 		s512.Write([]byte(cmd))
 	}
 

@@ -18,6 +18,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LBBFTClient interface {
+	Ordering(ctx context.Context, in *OrderingArgs, opts ...grpc.CallOption) (*OrderingReply, error)
 	PrePrepare(ctx context.Context, in *PrePrepareArgs, opts ...grpc.CallOption) (*PrePrepareReply, error)
 	Prepare(ctx context.Context, in *PrepareArgs, opts ...grpc.CallOption) (*PrepareReply, error)
 	Commit(ctx context.Context, in *CommitArgs, opts ...grpc.CallOption) (*empty.Empty, error)
@@ -29,6 +30,15 @@ type lBBFTClient struct {
 
 func NewLBBFTClient(cc grpc.ClientConnInterface) LBBFTClient {
 	return &lBBFTClient{cc}
+}
+
+func (c *lBBFTClient) Ordering(ctx context.Context, in *OrderingArgs, opts ...grpc.CallOption) (*OrderingReply, error) {
+	out := new(OrderingReply)
+	err := c.cc.Invoke(ctx, "/proto.LBBFT/Ordering", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *lBBFTClient) PrePrepare(ctx context.Context, in *PrePrepareArgs, opts ...grpc.CallOption) (*PrePrepareReply, error) {
@@ -62,6 +72,7 @@ func (c *lBBFTClient) Commit(ctx context.Context, in *CommitArgs, opts ...grpc.C
 // All implementations must embed UnimplementedLBBFTServer
 // for forward compatibility
 type LBBFTServer interface {
+	Ordering(context.Context, *OrderingArgs) (*OrderingReply, error)
 	PrePrepare(context.Context, *PrePrepareArgs) (*PrePrepareReply, error)
 	Prepare(context.Context, *PrepareArgs) (*PrepareReply, error)
 	Commit(context.Context, *CommitArgs) (*empty.Empty, error)
@@ -72,6 +83,9 @@ type LBBFTServer interface {
 type UnimplementedLBBFTServer struct {
 }
 
+func (UnimplementedLBBFTServer) Ordering(context.Context, *OrderingArgs) (*OrderingReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ordering not implemented")
+}
 func (UnimplementedLBBFTServer) PrePrepare(context.Context, *PrePrepareArgs) (*PrePrepareReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PrePrepare not implemented")
 }
@@ -92,6 +106,24 @@ type UnsafeLBBFTServer interface {
 
 func RegisterLBBFTServer(s grpc.ServiceRegistrar, srv LBBFTServer) {
 	s.RegisterService(&_LBBFT_serviceDesc, srv)
+}
+
+func _LBBFT_Ordering_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OrderingArgs)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LBBFTServer).Ordering(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.LBBFT/Ordering",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LBBFTServer).Ordering(ctx, req.(*OrderingArgs))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _LBBFT_PrePrepare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -152,6 +184,10 @@ var _LBBFT_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "proto.LBBFT",
 	HandlerType: (*LBBFTServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Ordering",
+			Handler:    _LBBFT_Ordering_Handler,
+		},
 		{
 			MethodName: "PrePrepare",
 			Handler:    _LBBFT_PrePrepare_Handler,

@@ -37,13 +37,14 @@ type LBBFTCore struct {
 	Exec chan []data.Command
 
 	// from lbbft
-	Mut        sync.Mutex // Lock for all internal data
-	ID         uint32
-	tSeq       atomic.Uint32           // Total sequence number of next request
-	seqmap     map[data.EntryID]uint32 // Use to map {Cid,CSeq} to global sequence number for all prepared message
-	View       uint32
-	Apply      uint32                       // Sequence number of last executed request
-	Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
+	Mut    sync.Mutex // Lock for all internal data
+	ID     uint32
+	TSeq   atomic.Uint32           // Total sequence number of next request
+	seqmap map[data.EntryID]uint32 // Use to map {Cid,CSeq} to global sequence number for all prepared message
+	View   uint32
+	Apply  uint32 // Sequence number of last executed request
+	Log    *data.LogList
+	// Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
 	cps        map[int]*CheckPoint
 	WaterLow   uint32
 	WaterHigh  uint32
@@ -60,6 +61,8 @@ type LBBFTCore struct {
 
 	Leader   uint32 // view改变的时候，再改变
 	IsLeader bool   // view改变的时候，再改变
+
+	waitEntry *sync.Cond
 }
 
 func (lbbft *LBBFTCore) AddCommand(command data.Command) {
@@ -71,7 +74,7 @@ func (lbbft *LBBFTCore) CommandSetLen(command data.Command) int {
 }
 
 // CreateProposal creates a new proposal
-func (lbbft *LBBFTCore) CreateProposal(timeout bool) *data.PrePrepareArgs {
+func (lbbft *LBBFTCore) GetProposeCommands(timeout bool) *([]data.Command) {
 
 	var batch []data.Command
 
@@ -81,15 +84,7 @@ func (lbbft *LBBFTCore) CreateProposal(timeout bool) *data.PrePrepareArgs {
 		batch = lbbft.cmdCache.RetriveExactlyFirst(lbbft.Config.BatchSize)
 	}
 
-	if batch == nil {
-		return nil
-	}
-	e := &data.PrePrepareArgs{
-		View:     lbbft.View,
-		Seq:      lbbft.tSeq.Inc(),
-		Commands: batch,
-	}
-	return e
+	return &batch
 }
 
 // New creates a new LBBFTCore instance
@@ -111,7 +106,7 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		seqmap:     make(map[data.EntryID]uint32),
 		View:       1,
 		Apply:      0,
-		Log:        make(map[data.EntryID]*data.Entry),
+		Log:        data.NewLogList(),
 		cps:        make(map[int]*CheckPoint),
 		WaterLow:   0,
 		WaterHigh:  2 * checkpointDiv,
@@ -125,6 +120,9 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		vcs:        make(map[uint32][]*ViewChangeArgs),
 		lastcp:     0,
 	}
+
+	lbbft.waitEntry = sync.NewCond(new(sync.Mutex))
+
 	lbbft.Q = lbbft.F*2 + 1
 	lbbft.Leader = (lbbft.View-1)%lbbft.N + 1
 	lbbft.IsLeader = (lbbft.Leader == lbbft.ID)
@@ -157,10 +155,21 @@ func (lbbft *LBBFTCore) GetExec() chan []data.Command {
 	return lbbft.Exec
 }
 
-func (lbbft *LBBFTCore) GetEntry(id data.EntryID) *data.Entry {
-	_, ok := lbbft.Log[id]
-	if !ok {
-		lbbft.Log[id] = &data.Entry{}
+func (lbbft *LBBFTCore) PutEntry(ent *data.Entry) {
+	if ok := lbbft.Log.Put(ent); ok {
+		lbbft.waitEntry.Broadcast()
+		return
+	} else {
+		lbbft.waitEntry.Wait()
+		lbbft.PutEntry(ent) // unsafe note: 一直等待，直到前面seq的entry都到达为止。
 	}
-	return lbbft.Log[id]
+}
+
+func (lbbft *LBBFTCore) GetEntry(eid *data.EntryID) *data.Entry {
+	if ent, ok := lbbft.Log.Get(eid); ok {
+		return ent
+	} else {
+		lbbft.waitEntry.Wait()
+		return lbbft.GetEntry(eid) // unsafe note: 一直等待，直到对应seq的entry到来。
+	}
 }

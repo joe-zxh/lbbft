@@ -3,7 +3,7 @@ package data
 type PrePrepareArgs struct {
 	View     uint32
 	Seq      uint32
-	Commands []Command
+	Commands *[]Command
 }
 
 type PrePrepareReply struct {

@@ -15,8 +15,8 @@ pushd..
 set home=%cd%
 popd
 
-set serverProcName=pbftlinearserver.exe
-set clientProcName=pbftlinearclient.exe
+set serverProcName=lbbftserver.exe
+set clientProcName=lbbftclient.exe
 
 set beg=1
 set /a end=%servernum%
@@ -25,7 +25,7 @@ set tls=true
 
 ::启动服务端
 for /l %%i in (%beg%,1,%end%) do (
-start cmd /k "cd/d %home% && %serverProcName% --tls=%tls% --self-id %%i --privkey %home%/keys/r%%i.key --batch-size 100"
+start cmd /k "cd/d %home% && %serverProcName% --tls=%tls% --self-id %%i --privkey %home%/keys/r%%i.key --batch-size 1"
 )
 
 :: --memprofile %home%/profileMem/mem%%i.prof

@@ -7,6 +7,9 @@ import "google/protobuf/empty.proto";
 option go_package = "github.com/joe-zxh/lbbft/internal/proto";
 
 service LBBFT {
+  rpc Ordering(OrderingArgs) returns (OrderingReply) {
+  }
+
   rpc PrePrepare(PrePrepareArgs) returns (PrePrepareReply) {
   }
 
@@ -15,6 +18,15 @@ service LBBFT {
 
   rpc Commit(CommitArgs) returns (google.protobuf.Empty) {
   }
+}
+
+message OrderingArgs { // request commands
+  repeated Command Commands = 1;
+}
+
+message OrderingReply {
+  uint32 Seq = 1;
+  PartialSig Sig = 2; // 同时也作为leader的PrepareReply
 }
 
 message PrePrepareArgs {

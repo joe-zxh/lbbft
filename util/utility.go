@@ -14,7 +14,13 @@ const (
 	debug = 1
 )
 
-// Struct's all member must be exported todo: 改sha512
+func PanicErr(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// Struct's all member must be exported
 func Digest(message interface{}) string {
 	var buf bytes.Buffer
 	gob.Register(message)

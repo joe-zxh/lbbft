@@ -52,7 +52,7 @@ type LBBFT struct {
 //New creates a new backend object.
 func New(conf *config.ReplicaConfig, tls bool, connectTimeout, qcTimeout time.Duration) *LBBFT {
 	lbbft := &LBBFT{
-		LBBFTCore: consensus.New(conf),
+		LBBFTCore:      consensus.New(conf),
 		nodes:          make(map[config.ReplicaID]*proto.LBBFTClient),
 		conns:          make(map[config.ReplicaID]*grpc.ClientConn),
 		connectTimeout: connectTimeout,
@@ -118,7 +118,7 @@ func (lbbft *LBBFT) startServer(port string) error {
 		grpcServerOpts = append(grpcServerOpts, grpc.Creds(credentials.NewServerTLSFromCert(lbbft.Config.Cert)))
 	}
 
-	lbbft.server = newLBBFTServer(lbbft) // todo: 实现preprepare、prepare、commit
+	lbbft.server = newLBBFTServer(lbbft)
 
 	s := grpc.NewServer(grpcServerOpts...)
 	proto.RegisterLBBFTServer(s, lbbft.server)
@@ -145,44 +145,112 @@ type lbbftServer struct {
 	clients map[context.Context]config.ReplicaID
 }
 
+func (lbbft *LBBFT) Ordering(_ context.Context, pO *proto.OrderingArgs) (*proto.OrderingReply, error) {
+
+	logger.Printf("Ordering: leader id:%d\n", lbbft.ID)
+
+	if !lbbft.IsLeader {
+		return &proto.OrderingReply{}, errors.New(`I am not the leader`)
+	}
+
+	tseq := lbbft.TSeq.Inc()
+
+	ent := &data.Entry{
+		PP: &data.PrePrepareArgs{
+			View:     lbbft.View,
+			Seq:      tseq,
+			Commands: pO.GetDataCommands(),
+		},
+	}
+
+	ent.Mut.Lock()
+	lbbft.PutEntry(ent)
+	ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, ent.GetPrepareHash().ToSlice())
+	if err != nil {
+		panic(err)
+	}
+	ent.Mut.Unlock()
+
+	return &proto.OrderingReply{
+		Seq: tseq,
+		Sig: proto.PartialSig2Proto(ps),
+	}, nil
+}
+
 func (lbbft *LBBFT) Propose(timeout bool) {
-	dPP := lbbft.CreateProposal(timeout)
-	if dPP == nil {
+	cmds := lbbft.GetProposeCommands(timeout)
+	if (*cmds) == nil {
 		return
 	}
 
-	// leader先处理自己的entry的pp 以及 prepare的签名
-	lbbft.Mut.Lock()
-	ent := lbbft.GetEntry(data.EntryID{V: dPP.View, N: dPP.Seq})
-	lbbft.Mut.Unlock()
+	pOA := proto.Commands2OrderingArgs(cmds) // todo: 如果是leader，其实可以不用转2次。
 
-	ent.Mut.Lock()
-	if ent.PP != nil {
-		panic(`leader: ent.PP != nil`)
+	var pOR *proto.OrderingReply
+	var err error
+
+	if lbbft.IsLeader {
+		pOR, err = lbbft.Ordering(context.TODO(), pOA)
+		util.PanicErr(err)
+	} else {
+		pOR, err = (*lbbft.nodes[config.ReplicaID(lbbft.Leader)]).Ordering(context.TODO(), pOA)
+		util.PanicErr(err)
+
+		dPP := &data.PrePrepareArgs{
+			View:     lbbft.View,
+			Seq:      pOR.Seq,
+			Commands: cmds,
+		}
+
+		ent := &data.Entry{
+			PP: dPP,
+		}
+
+		lbbft.PutEntry(ent)
 	}
-	ent.PP = dPP
 
+	ent := lbbft.GetEntry(&data.EntryID{V: lbbft.View, N: pOR.Seq})
+	ent.Mut.Lock()
 	if ent.PreparedCert != nil {
-		panic(`leader: ent.PreparedCert != nil`)
+		panic(`collector: ent.PreparedCert != nil`)
 	}
 	qc := &data.QuorumCert{
 		Sigs:       make(map[config.ReplicaID]data.PartialSig),
 		SigContent: ent.GetPrepareHash(),
 	}
 	ent.PreparedCert = qc
+
 	ent.Mut.Unlock()
 
-	go func() { // 签名比较耗时，所以用goroutine来进行
-		ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, qc.SigContent.ToSlice())
-		if err != nil {
-			panic(err)
+	go func() {
+		leaderPs := *pOR.Sig.Proto2PartialSig()
+
+		if !lbbft.IsLeader { // collector的签名
+			ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, qc.SigContent.ToSlice())
+			if err != nil {
+				panic(err)
+			}
+
+			// 认证leader的签名
+			if !lbbft.SigCache.VerifySignature(leaderPs, qc.SigContent) {
+				panic(`ordering signature from leader is not correct`)
+			}
+
+			ent.Mut.Lock()
+			ent.PreparedCert.Sigs[lbbft.Config.ID] = *ps                     // collector的签名
+			ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs // leader的签名
+			ent.Mut.Unlock()
+		} else {
+			ent.Mut.Lock()
+			ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs
+			ent.Mut.Unlock()
 		}
-		ent.Mut.Lock()
-		ent.PreparedCert.Sigs[lbbft.Config.ID] = *ps
-		ent.Mut.Unlock()
 	}()
 
-	pPP := proto.PP2Proto(dPP)
+	pPP := &proto.PrePrepareArgs{
+		View:     ent.PP.View,
+		Seq:      ent.PP.Seq,
+		Commands: pOA.Commands,
+	}
 	lbbft.BroadcastPrePrepareRequest(pPP, ent)
 }
 
@@ -190,7 +258,7 @@ func (lbbft *LBBFT) BroadcastPrePrepareRequest(pPP *proto.PrePrepareArgs, ent *d
 	logger.Printf("[B/PrePrepare]: view: %d, seq: %d, (%d commands)\n", pPP.View, pPP.Seq, len(pPP.Commands))
 
 	for rid, client := range lbbft.nodes {
-		if rid != lbbft.Config.ID {
+		if rid != lbbft.Config.ID && rid != config.ReplicaID(lbbft.Leader) { // 向leader发送的ordering，相当于PrePrepare了，所以不需要重复发送
 			go func(id config.ReplicaID, cli *proto.LBBFTClient) {
 				pPPR, err := (*cli).PrePrepare(context.TODO(), pPP)
 				if err != nil {
@@ -203,7 +271,7 @@ func (lbbft *LBBFT) BroadcastPrePrepareRequest(pPP *proto.PrePrepareArgs, ent *d
 					ent.PreparedCert.Sigs[id] = *dPS
 					if len(ent.PreparedCert.Sigs) > int(2*lbbft.F) {
 
-						// leader先处理自己的entry的commit的签名
+						// collector先处理自己的entry的commit的签名
 						ent.Prepared = true
 						if ent.CommittedCert != nil {
 							panic(`leader: ent.CommittedCert != nil`)
@@ -314,42 +382,26 @@ func (lbbft *LBBFT) PrePrepare(_ context.Context, pPP *proto.PrePrepareArgs) (*p
 
 	dPP := pPP.Proto2PP()
 
-	lbbft.Mut.Lock()
-
 	if !lbbft.Changing && lbbft.View == dPP.View {
 
-		ent := lbbft.GetEntry(data.EntryID{V: dPP.View, N: dPP.Seq})
-		lbbft.Mut.Unlock()
-
-		ent.Mut.Lock()
-		if ent.Digest == nil {
-			ent.PP = dPP
-			ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, ent.GetPrepareHash().ToSlice())
-			if err != nil {
-				panic(err)
-			}
-			if ent.Committed { // 有可能已经commit了，但是PP还没收到
-				elem := &util.PQElem{
-					Pri: int(ent.PP.Seq),
-					C:   ent.PP.Commands,
-				}
-				go lbbft.ApplyCommands(elem)
-			}
-
-			ent.Mut.Unlock()
-
-			ppReply := &proto.PrePrepareReply{
-				Sig: proto.PartialSig2Proto(ps),
-			}
-			return ppReply, nil
-		} else {
-			ent.Mut.Unlock()
-			fmt.Println(`多个具有相同seq的preprepare`)
-			return nil, errors.New(`多个具有相同seq的preprepare`)
+		ent := &data.Entry{
+			PP: dPP,
 		}
+		ent.Mut.Lock()
+		lbbft.PutEntry(ent)
+
+		ent.PP = dPP
+		ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, ent.GetPrepareHash().ToSlice())
+		util.PanicErr(err)
+
+		ent.Mut.Unlock()
+
+		ppReply := &proto.PrePrepareReply{
+			Sig: proto.PartialSig2Proto(ps),
+		}
+		return ppReply, nil
 
 	} else {
-		lbbft.Mut.Unlock()
 		return nil, errors.New(`正在view change 或者 view不匹配`)
 	}
 }
@@ -359,7 +411,7 @@ func (lbbft *LBBFT) Prepare(_ context.Context, pP *proto.PrepareArgs) (*proto.Pr
 
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pP.View {
-		ent := lbbft.GetEntry(data.EntryID{pP.View, pP.Seq})
+		ent := lbbft.GetEntry(&data.EntryID{pP.View, pP.Seq})
 		lbbft.Mut.Unlock()
 
 		ent.Mut.Lock()
@@ -376,7 +428,7 @@ func (lbbft *LBBFT) Prepare(_ context.Context, pP *proto.PrepareArgs) (*proto.Pr
 		}
 
 		if ent.PreparedCert != nil {
-			panic(`follower: ent.PreparedCert != nil`)
+			panic(`receiver: ent.PreparedCert != nil`)
 		}
 		ent.PreparedCert = &data.QuorumCert{
 			Sigs:       dQc.Sigs,
@@ -404,7 +456,7 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	logger.Printf("Receive Commit: seq: %d, view: %d\n", pC.Seq, pC.View)
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pC.View {
-		ent := lbbft.GetEntry(data.EntryID{pC.View, pC.Seq})
+		ent := lbbft.GetEntry(&data.EntryID{pC.View, pC.Seq})
 		lbbft.Mut.Unlock()
 
 		ent.Mut.Lock()
@@ -431,13 +483,14 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 		ent.CommitHash = &dQc.SigContent // 这里应该做检查的，如果先收到P，CHash需要相等。PP那里，如果有PHash和CHash需要检查是否相等。这里简化了。
 
 		if ent.PP != nil {
+			fmt.Println(`fuck`)
 			elem := &util.PQElem{
 				Pri: int(ent.PP.Seq),
 				C:   ent.PP.Commands,
 			}
 			ent.Mut.Unlock()
 			go lbbft.ApplyCommands(elem)
-		}else{
+		} else {
 			ent.Mut.Unlock()
 		}
 
@@ -448,7 +501,41 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	return &empty.Empty{}, nil
 }
 
-func (lbbft *LBBFT) ApplyCommands(elem *util.PQElem) {
+func (lbbft *LBBFT) ApplyCommands(commitSeq uint32) {
+	lbbft.Mut.Lock()
+	for lbbft.Apply < commitSeq {
+		ent := lbbft.GetEntry()
+
+	}
+
+	inserted := lbbft.ApplyQueue.Insert(*elem)
+	if !inserted {
+		panic("Already insert some request with same sequence")
+	}
+
+	for i, sz := 0, lbbft.ApplyQueue.Length(); i < sz; i++ { // commit需要按global seq的顺序
+		m, err := lbbft.ApplyQueue.GetMin()
+		if err != nil {
+			break
+		}
+		if int(lbbft.Apply+1) == m.Pri {
+			lbbft.Apply++
+			cmds, ok := m.C.([]data.Command)
+			if ok {
+				lbbft.Exec <- cmds
+			}
+			lbbft.ApplyQueue.ExtractMin()
+
+		} else if int(lbbft.Apply+1) > m.Pri {
+			panic("This should already done")
+		} else {
+			break
+		}
+	}
+	lbbft.Mut.Unlock()
+}
+
+func (lbbft *LBBFT) ApplyCommands2(elem *util.PQElem) {
 	lbbft.Mut.Lock()
 	inserted := lbbft.ApplyQueue.Insert(*elem)
 	if !inserted {
@@ -477,32 +564,10 @@ func (lbbft *LBBFT) ApplyCommands(elem *util.PQElem) {
 	lbbft.Mut.Unlock()
 }
 
-func (lbbft *LBBFT) ApplyCommands1() {
-	for i, sz := 0, lbbft.ApplyQueue.Length(); i < sz; i++ { // commit需要按global seq的顺序
-		m, err := lbbft.ApplyQueue.GetMin()
-		if err != nil {
-			break
-		}
-		if int(lbbft.Apply+1) == m.Pri {
-			lbbft.Apply++
-			cmds, ok := m.C.([]data.Command)
-			if ok {
-				lbbft.Exec <- cmds
-			}
-			lbbft.ApplyQueue.ExtractMin()
-
-		} else if int(lbbft.Apply+1) > m.Pri {
-			panic("This should already done")
-		} else {
-			break
-		}
-	}
-}
-
 func newLBBFTServer(lbbft *LBBFT) *lbbftServer {
 	pbftSrv := &lbbftServer{
-		LBBFT: lbbft,
-		clients:    make(map[context.Context]config.ReplicaID),
+		LBBFT:   lbbft,
+		clients: make(map[context.Context]config.ReplicaID),
 	}
 	return pbftSrv
 }
