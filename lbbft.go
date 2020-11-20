@@ -208,7 +208,7 @@ func (lbbft *LBBFT) Propose(timeout bool) {
 		lbbft.PutEntry(ent)
 	}
 
-	ent := lbbft.GetEntry(&data.EntryID{V: lbbft.View, N: pOR.Seq})
+	ent := lbbft.GetEntryBySeq(pOR.Seq)
 	ent.Mut.Lock()
 	if ent.PreparedCert != nil {
 		panic(`collector: ent.PreparedCert != nil`)
@@ -341,14 +341,8 @@ func (lbbft *LBBFT) BroadcastPrepareRequest(pP *proto.PrepareArgs, ent *data.Ent
 						}
 						lbbft.BroadcastCommitRequest(pC)
 
-						// 对于leader来说，pp一定存在的，所以不需要先判断是否为nil
-						elem := &util.PQElem{
-							Pri: int(ent.PP.Seq),
-							C:   ent.PP.Commands,
-						}
 						ent.Mut.Unlock()
-						go lbbft.ApplyCommands(elem)
-
+						go lbbft.ApplyCommands(pC.Seq)
 					} else {
 						ent.Mut.Unlock()
 					}
@@ -411,7 +405,7 @@ func (lbbft *LBBFT) Prepare(_ context.Context, pP *proto.PrepareArgs) (*proto.Pr
 
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pP.View {
-		ent := lbbft.GetEntry(&data.EntryID{pP.View, pP.Seq})
+		ent := lbbft.GetEntryBySeq(pP.Seq)
 		lbbft.Mut.Unlock()
 
 		ent.Mut.Lock()
@@ -456,7 +450,7 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	logger.Printf("Receive Commit: seq: %d, view: %d\n", pC.Seq, pC.View)
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pC.View {
-		ent := lbbft.GetEntry(&data.EntryID{pC.View, pC.Seq})
+		ent := lbbft.GetEntryBySeq(pC.Seq)
 		lbbft.Mut.Unlock()
 
 		ent.Mut.Lock()
@@ -482,18 +476,9 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 		ent.Committed = true
 		ent.CommitHash = &dQc.SigContent // 这里应该做检查的，如果先收到P，CHash需要相等。PP那里，如果有PHash和CHash需要检查是否相等。这里简化了。
 
-		if ent.PP != nil {
-			fmt.Println(`fuck`)
-			elem := &util.PQElem{
-				Pri: int(ent.PP.Seq),
-				C:   ent.PP.Commands,
-			}
-			ent.Mut.Unlock()
-			go lbbft.ApplyCommands(elem)
-		} else {
-			ent.Mut.Unlock()
-		}
+		go lbbft.ApplyCommands(pC.Seq)
 
+		ent.Mut.Unlock()
 		return &empty.Empty{}, nil
 	} else {
 		lbbft.Mut.Unlock()
@@ -503,35 +488,13 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 
 func (lbbft *LBBFT) ApplyCommands(commitSeq uint32) {
 	lbbft.Mut.Lock()
-	for lbbft.Apply < commitSeq {
-		ent := lbbft.GetEntry()
+	cmds, applyUpdate := lbbft.GetApplyCmds(lbbft.Apply + 1)
 
+	if applyUpdate != lbbft.Apply {
+		lbbft.Apply = applyUpdate
+		lbbft.Exec <- *cmds
 	}
 
-	inserted := lbbft.ApplyQueue.Insert(*elem)
-	if !inserted {
-		panic("Already insert some request with same sequence")
-	}
-
-	for i, sz := 0, lbbft.ApplyQueue.Length(); i < sz; i++ { // commit需要按global seq的顺序
-		m, err := lbbft.ApplyQueue.GetMin()
-		if err != nil {
-			break
-		}
-		if int(lbbft.Apply+1) == m.Pri {
-			lbbft.Apply++
-			cmds, ok := m.C.([]data.Command)
-			if ok {
-				lbbft.Exec <- cmds
-			}
-			lbbft.ApplyQueue.ExtractMin()
-
-		} else if int(lbbft.Apply+1) > m.Pri {
-			panic("This should already done")
-		} else {
-			break
-		}
-	}
 	lbbft.Mut.Unlock()
 }
 

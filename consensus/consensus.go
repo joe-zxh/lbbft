@@ -173,3 +173,16 @@ func (lbbft *LBBFTCore) GetEntry(eid *data.EntryID) *data.Entry {
 		return lbbft.GetEntry(eid) // unsafe note: 一直等待，直到对应seq的entry到来。
 	}
 }
+
+func (lbbft *LBBFTCore) GetEntryBySeq(seq uint32) *data.Entry {
+	if ent, ok := lbbft.Log.GetEntryBySeq(seq); ok {
+		return ent
+	} else {
+		lbbft.waitEntry.Wait()
+		return lbbft.GetEntryBySeq(seq) // unsafe note: 一直等待，直到对应seq的entry到来。
+	}
+}
+
+func (lbbft *LBBFTCore) GetApplyCmds(commitSeq uint32) (*[]data.Command, uint32) {
+	return lbbft.Log.GetApplyCmds(commitSeq)
+}

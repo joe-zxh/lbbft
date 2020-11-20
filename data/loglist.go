@@ -1,6 +1,8 @@
 package data
 
-import "sync"
+import (
+	"sync"
+)
 
 type LogList struct {
 	Log []*Entry
@@ -68,11 +70,34 @@ func (logList *LogList) Get(eid *EntryID) (ent *Entry, ok bool) {
 	return
 }
 
-func (lbbft *LBBFTCore) GetEntryBySeq(seq uint32) *data.Entry {
-	if ent, ok := lbbft.Log.Get(eid); ok {
-		return ent
+func (logList *LogList) GetEntryBySeq(seq uint32) (ent *Entry, ok bool) {
+	logList.mut.Lock()
+	defer logList.mut.Unlock()
+
+	if uint32(len(logList.Log)) <= seq {
+		ent = nil
+		ok = false
 	} else {
-		lbbft.waitEntry.Wait()
-		return lbbft.GetEntry(eid) // unsafe note: 一直等待，直到对应seq的entry到来。
+		ent = logList.Log[seq]
+		ok = true
 	}
+	return
+}
+
+func (logList *LogList) GetApplyCmds(seq uint32) (*[]Command, uint32) {
+	logList.mut.Lock()
+	defer logList.mut.Unlock()
+
+	commands := make([]Command, 0)
+
+	for seq < uint32(len(logList.Log)) {
+		ent := logList.Log[seq]
+		if ent.Committed {
+			commands = append(commands, *ent.PP.Commands...)
+			seq++
+		} else {
+			break
+		}
+	}
+	return &commands, seq - 1
 }
