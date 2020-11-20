@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package proto;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/joe-zxh/lbbft/internal/proto";
+
+service LBBFT {
+  rpc PrePrepare(PrePrepareArgs) returns (PrePrepareReply) {
+  }
+
+  rpc Prepare(PrepareArgs) returns (PrepareReply) {
+  }
+
+  rpc Commit(CommitArgs) returns (google.protobuf.Empty) {
+  }
+}
+
+message PrePrepareArgs {
+  uint32 View = 1;
+  uint32 Seq = 2;
+  repeated Command Commands = 3;
+}
+
+message PrePrepareReply {
+  PartialSig Sig = 1;
+}
+
+message PrepareArgs {
+  uint32 View = 1;
+  uint32 Seq = 2;
+  QuorumCert QC = 3;
+}
+
+message PrepareReply {
+  PartialSig Sig = 1;
+}
+
+message CommitArgs {
+  uint32 View = 1;
+  uint32 Seq = 2;
+  QuorumCert QC = 3;
+}
+
+message Command {bytes Data = 1;}
+
+// ecdsa的签名
+message PartialSig {
+  int32 ReplicaID = 1;
+  bytes R = 2;
+  bytes S = 3;
+}
+
+message QuorumCert {
+  repeated PartialSig Sigs = 1;
+  bytes SigContent = 2;
+}
