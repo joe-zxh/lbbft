@@ -43,7 +43,10 @@ type LBBFTCore struct {
 	seqmap map[data.EntryID]uint32 // Use to map {Cid,CSeq} to global sequence number for all prepared message
 	View   uint32
 	Apply  uint32 // Sequence number of last executed request
-	Log    *data.LogList
+
+	Log    []*data.Entry
+	LogMut sync.Mutex
+
 	// Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
 	cps        map[int]*CheckPoint
 	WaterLow   uint32
@@ -87,6 +90,30 @@ func (lbbft *LBBFTCore) GetProposeCommands(timeout bool) *([]data.Command) {
 	return &batch
 }
 
+func (lbbft *LBBFTCore) InitLog() {
+	lbbft.LogMut.Lock()
+	defer lbbft.LogMut.Unlock()
+	dPP := data.PrePrepareArgs{
+		View:     1,
+		Seq:      0,
+		Commands: nil,
+	}
+
+	nonce := &data.Entry{
+		PP:            &dPP,
+		PreparedCert:  nil,
+		Prepared:      true,
+		CommittedCert: nil,
+		Committed:     true,
+		PreEntryHash:  &data.EntryHash{},
+		Digest:        &data.EntryHash{},
+		PrepareHash:   &data.EntryHash{},
+		CommitHash:    &data.EntryHash{},
+	}
+
+	lbbft.Log = append([]*data.Entry{}, nonce)
+}
+
 // New creates a new LBBFTCore instance
 func New(conf *config.ReplicaConfig) *LBBFTCore {
 	logger.SetPrefix(fmt.Sprintf("hs(id %d): ", conf.ID))
@@ -106,7 +133,6 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		seqmap:     make(map[data.EntryID]uint32),
 		View:       1,
 		Apply:      0,
-		Log:        data.NewLogList(),
 		cps:        make(map[int]*CheckPoint),
 		WaterLow:   0,
 		WaterHigh:  2 * checkpointDiv,
@@ -121,7 +147,9 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		lastcp:     0,
 	}
 
-	lbbft.waitEntry = sync.NewCond(new(sync.Mutex))
+	lbbft.InitLog()
+
+	lbbft.waitEntry = sync.NewCond(&lbbft.LogMut)
 
 	lbbft.Q = lbbft.F*2 + 1
 	lbbft.Leader = (lbbft.View-1)%lbbft.N + 1
@@ -156,33 +184,56 @@ func (lbbft *LBBFTCore) GetExec() chan []data.Command {
 }
 
 func (lbbft *LBBFTCore) PutEntry(ent *data.Entry) {
-	if ok := lbbft.Log.Put(ent); ok {
-		lbbft.waitEntry.Broadcast()
-		return
-	} else {
-		lbbft.waitEntry.Wait()
-		lbbft.PutEntry(ent) // unsafe note: 一直等待，直到前面seq的entry都到达为止。
-	}
-}
+	lbbft.LogMut.Lock()
+	defer lbbft.LogMut.Unlock()
 
-func (lbbft *LBBFTCore) GetEntry(eid *data.EntryID) *data.Entry {
-	if ent, ok := lbbft.Log.Get(eid); ok {
-		return ent
-	} else {
-		lbbft.waitEntry.Wait()
-		return lbbft.GetEntry(eid) // unsafe note: 一直等待，直到对应seq的entry到来。
+	listLen := uint32(len(lbbft.Log))
+
+	if listLen > ent.PP.Seq {
+		panic(`try to overwrite an entry`)
 	}
+
+	for listLen < ent.PP.Seq {
+		lbbft.waitEntry.Wait()
+		listLen = uint32(len(lbbft.Log))
+	}
+
+	// listLen == ent.PP.Seq
+	ent.PreEntryHash = lbbft.Log[listLen-1].Digest
+	ent.GetCommitHash() // 把Digest都算出来，以免后一个entry添加的时候 PreEntryHash是空的。记得在Put的外部，给ent加锁。
+	lbbft.Log = append(lbbft.Log, ent)
+
+	lbbft.waitEntry.Broadcast()
 }
 
 func (lbbft *LBBFTCore) GetEntryBySeq(seq uint32) *data.Entry {
-	if ent, ok := lbbft.Log.GetEntryBySeq(seq); ok {
-		return ent
-	} else {
+	lbbft.LogMut.Lock()
+	defer lbbft.LogMut.Unlock()
+
+	listLen := uint32(len(lbbft.Log))
+
+	for listLen <= seq {
 		lbbft.waitEntry.Wait()
-		return lbbft.GetEntryBySeq(seq) // unsafe note: 一直等待，直到对应seq的entry到来。
+		listLen = uint32(len(lbbft.Log))
 	}
+
+	return lbbft.Log[seq]
 }
 
 func (lbbft *LBBFTCore) GetApplyCmds(commitSeq uint32) (*[]data.Command, uint32) {
-	return lbbft.Log.GetApplyCmds(commitSeq)
+	lbbft.LogMut.Lock()
+	defer lbbft.LogMut.Unlock()
+
+	commands := make([]data.Command, 0)
+
+	for commitSeq < uint32(len(lbbft.Log)) {
+		ent := lbbft.Log[commitSeq]
+		if ent.Committed {
+			commands = append(commands, *ent.PP.Commands...)
+			commitSeq++
+		} else {
+			break
+		}
+	}
+	return &commands, commitSeq - 1
 }

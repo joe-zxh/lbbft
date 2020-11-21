@@ -205,7 +205,9 @@ func (lbbft *LBBFT) Propose(timeout bool) {
 			PP: dPP,
 		}
 
+		ent.Mut.Lock()
 		lbbft.PutEntry(ent)
+		ent.Mut.Unlock()
 	}
 
 	ent := lbbft.GetEntryBySeq(pOR.Seq)
@@ -405,8 +407,8 @@ func (lbbft *LBBFT) Prepare(_ context.Context, pP *proto.PrepareArgs) (*proto.Pr
 
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pP.View {
-		ent := lbbft.GetEntryBySeq(pP.Seq)
 		lbbft.Mut.Unlock()
+		ent := lbbft.GetEntryBySeq(pP.Seq)
 
 		ent.Mut.Lock()
 
@@ -450,8 +452,8 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	logger.Printf("Receive Commit: seq: %d, view: %d\n", pC.Seq, pC.View)
 	lbbft.Mut.Lock()
 	if !lbbft.Changing && lbbft.View == pC.View {
-		ent := lbbft.GetEntryBySeq(pC.Seq)
 		lbbft.Mut.Unlock()
+		ent := lbbft.GetEntryBySeq(pC.Seq)
 
 		ent.Mut.Lock()
 
