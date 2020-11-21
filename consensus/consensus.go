@@ -220,20 +220,20 @@ func (lbbft *LBBFTCore) GetEntryBySeq(seq uint32) *data.Entry {
 	return lbbft.Log[seq]
 }
 
-func (lbbft *LBBFTCore) GetApplyCmds(commitSeq uint32) (*[]data.Command, uint32) {
+func (lbbft *LBBFTCore) ApplyCommands(commitSeq uint32) {
+	lbbft.Mut.Lock()
+	defer lbbft.Mut.Unlock()
+
 	lbbft.LogMut.Lock()
 	defer lbbft.LogMut.Unlock()
 
-	commands := make([]data.Command, 0)
-
-	for commitSeq < uint32(len(lbbft.Log)) {
-		ent := lbbft.Log[commitSeq]
-		if ent.Committed {
-			commands = append(commands, *ent.PP.Commands...)
-			commitSeq++
+	for lbbft.Apply < commitSeq {
+		if lbbft.Apply+1 < uint32(len(lbbft.Log)) {
+			ent := lbbft.Log[lbbft.Apply+1]
+			lbbft.Exec <- *ent.PP.Commands
+			lbbft.Apply++
 		} else {
 			break
 		}
 	}
-	return &commands, commitSeq - 1
 }

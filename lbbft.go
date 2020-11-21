@@ -488,18 +488,6 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	return &empty.Empty{}, nil
 }
 
-func (lbbft *LBBFT) ApplyCommands(commitSeq uint32) {
-	lbbft.Mut.Lock()
-	cmds, applyUpdate := lbbft.GetApplyCmds(lbbft.Apply + 1)
-
-	if applyUpdate != lbbft.Apply {
-		lbbft.Apply = applyUpdate
-		lbbft.Exec <- *cmds
-	}
-
-	lbbft.Mut.Unlock()
-}
-
 func (lbbft *LBBFT) ApplyCommands2(elem *util.PQElem) {
 	lbbft.Mut.Lock()
 	inserted := lbbft.ApplyQueue.Insert(*elem)
