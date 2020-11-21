@@ -286,7 +286,7 @@ func (c *hotstuffClient) GetStats() *benchmark.Result {
 }
 
 func (c *hotstuffClient) SendCommands(ctx context.Context) error {
-	var num uint64
+	var num uint64 = 1
 	var sleeptime time.Duration
 	if c.conf.RateLimit > 0 {
 		sleeptime = time.Second / time.Duration(c.conf.RateLimit)

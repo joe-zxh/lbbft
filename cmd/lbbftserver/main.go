@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -171,12 +170,10 @@ func main() {
 
 	log.Printf("replica %d starts", conf.SelfID)
 
-	if conf.SelfID == 1 {
-		go func() {
-			err := http.ListenAndServe("127.0.0.1:6060", nil)
-			fmt.Printf("start http listen: %v\n", err)
-		}()
-	}
+	//go func() {
+	//	err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", 6060+conf.SelfID), nil)
+	//	fmt.Printf("start http listen: %v\n", err)
+	//}()
 
 	privkey, err := data.ReadPrivateKeyFile(conf.Privkey)
 	if err != nil {
@@ -256,7 +253,7 @@ func main() {
 		replicaConfig.Replicas[r.ID] = info
 	}
 	replicaConfig.ClusterSize = len(replicaConfig.Replicas)
-	replicaConfig.QuorumSize = 2*((len(replicaConfig.Replicas)-1)/3)+1 // pbft: 2f+1
+	replicaConfig.QuorumSize = 2*((len(replicaConfig.Replicas)-1)/3) + 1 // pbft: 2f+1
 
 	srv := newLBBFTServer(&conf, replicaConfig)
 	err = srv.Start(clientAddress)
@@ -290,11 +287,11 @@ type cmdID struct {
 
 // 这个server是面向 客户端的。
 type lbbftServer struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	conf       *options
-	gorumsSrv  *client.GorumsServer
-	lbbft *lbbft.LBBFT
+	ctx       context.Context
+	cancel    context.CancelFunc
+	conf      *options
+	gorumsSrv *client.GorumsServer
+	lbbft     *lbbft.LBBFT
 
 	mut          sync.Mutex
 	finishedCmds map[cmdID]chan struct{}
@@ -390,7 +387,9 @@ func (srv *lbbftServer) ExecCommand(_ context.Context, cmd *client.Command, out 
 	srv.finishedCmds[id] = finished
 	srv.mut.Unlock()
 
-	if srv.lbbft.IsLeader {
+	// if srv.lbbft.IsLeader {
+	if srv.lbbft.ID == (uint32(cmd.SequenceNumber)-1)%4+1 {
+		// fmt.Printf("ID: %d, seq: %d\n", srv.lbbft.ID, cmd.SequenceNumber)
 		cmd.Data = srv.getPayloadData(cmd.PayloadSize)
 
 		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(cmd)
