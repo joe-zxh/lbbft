@@ -54,21 +54,25 @@ echo ¿½±´hotstuff...
 copy .\hotstuff\scripts\run_hs_server.bat .\bftWin\scripts
 copy .\hotstuff\hotstuffclient.exe .\bftWin
 copy .\hotstuff\hotstuffserver.exe .\bftWin
+copy .\hotstuff\hotstuff.toml .\bftWin
 
 echo ¿½±´pbft...
 copy .\pbft\scripts\run_pbft_server.bat .\bftWin\scripts
 copy .\pbft\pbftclient.exe .\bftWin
 copy .\pbft\pbftserver.exe .\bftWin
+copy .\pbft\pbft.toml .\bftWin
 
 echo ¿½±´pbftlinear...
 copy .\pbftlinear\scripts\run_pbftlinear_server.bat .\bftWin\scripts
 copy .\pbftlinear\pbftlinearclient.exe .\bftWin
 copy .\pbftlinear\pbftlinearserver.exe .\bftWin
+copy .\pbftlinear\pbftlinear.toml .\bftWin
 
 echo ¿½±´lbbft...
 copy .\lbbft\scripts\run_lbbft_server.bat .\bftWin\scripts
 copy .\lbbft\lbbftclient.exe .\bftWin
 copy .\lbbft\lbbftserver.exe .\bftWin
+copy .\lbbft\lbbft.toml .\bftWin
 
 echo ´ò°ü³ÉbftWin.zip...
 Bandizip.exe  a -r -l:5 bftWin.zip bftWin\*
