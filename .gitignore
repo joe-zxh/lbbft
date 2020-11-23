@@ -3,6 +3,8 @@ profileCPU/
 profileMem/
 
 # Binaries for programs and plugins
+lbbftclient
+lbbftserver
 *.exe
 *.exe~
 *.dll
@@ -11,3 +13,4 @@ profileMem/
 keys/
 .idea/
 test.bat
+scripts/linux/test.sh
