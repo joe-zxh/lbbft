@@ -26,7 +26,7 @@ trap 'trap - SIGTERM && kill -- -$$' SIGINT SIGTERM EXIT
 # 启动程序
 for((i=1;i<=$clusterSize;i++));  
 do
-    $bin --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize  > $log_dir/$i.out 2>&1 "$@" &
+    $bin --tls=true --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize  >> $log_dir/$i.out 2>&1 "$@" &
     echo $!
     if [ $cpuPer -ne 0 ]; then
         start=$(expr $cpuTotal - $cpuPer \* $(expr $clusterSize - $i + 1));

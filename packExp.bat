@@ -11,10 +11,7 @@ if "%1%"=="Linux" (
     SET GOOS=linux
     SET GOARCH=amd64
 
-    echo åˆ›å»ºLinuxç‰ˆæœ¬çš„å®éªŒæ–‡ä»¶...
-
-    echo æ‹·è´Linuxç‰ˆæœ¬è„šæœ¬...
-    copy .\lbbft\scripts\linux\*.sh .\%dirName%
+    echo ´´½¨Linux°æ±¾µÄÊµÑéÎÄ¼ş...
 
 ) else if "%1%"=="Win" (
     set exeSuffix=.exe
@@ -23,17 +20,11 @@ if "%1%"=="Linux" (
     SET GOOS=windows
     SET GOARCH=amd64
 
-    echo åˆ›å»ºwindowsç‰ˆæœ¬çš„å®éªŒæ–‡ä»¶...  
-
-    echo æ‹·è´windowsç‰ˆæœ¬è„šæœ¬...
-    copy .\hotstuff\scripts\run_hotstuff_server.bat .\%dirName%\scripts
-    copy .\pbft\scripts\run_pbft_server.bat .\%dirName%\scripts
-    copy .\pbftlinear\scripts\run_pbftlinear_server.bat .\%dirName%\scripts
-    copy .\lbbft\scripts\run_lbbft_server.bat .\%dirName%\scripts
+    echo ´´½¨windows°æ±¾µÄÊµÑéÎÄ¼ş...  
 
 ) else (
-    echo ç”Ÿæˆlinuxç‰ˆæœ¬çš„å®éªŒæ–‡ä»¶ï¼Œè¯·è¾“å…¥: .\packExp.bat Linux
-    echo ç”ŸæˆWindowsç‰ˆæœ¬çš„å®éªŒæ–‡ä»¶ï¼Œè¯·è¾“å…¥: .\packExp.bat Win
+    echo Éú³Élinux°æ±¾µÄÊµÑéÎÄ¼ş£¬ÇëÊäÈë: .\packExp.bat Linux
+    echo Éú³ÉWindows°æ±¾µÄÊµÑéÎÄ¼ş£¬ÇëÊäÈë: .\packExp.bat Win
     exit
 )
 
@@ -42,13 +33,24 @@ rd %dirName% /s /q
 
 md %dirName%
 md %dirName%\keys
-md %dirName%\scripts
 
-echo æ‹·è´keys
+if "%1%"=="Linux" (
+    echo ¿½±´Linux°æ±¾½Å±¾...
+    copy .\lbbft\scripts\linux\*.sh .\%dirName%
+) else if "%1%"=="Win" (
+    md %dirName%\scripts
+    echo ¿½±´windows°æ±¾½Å±¾...
+    copy .\hotstuff\scripts\run_hotstuff_server.bat .\%dirName%\scripts
+    copy .\pbft\scripts\run_pbft_server.bat .\%dirName%\scripts
+    copy .\pbftlinear\scripts\run_pbftlinear_server.bat .\%dirName%\scripts
+    copy .\lbbft\scripts\run_lbbft_server.bat .\%dirName%\scripts
+)
+
+echo ¿½±´keys
 xcopy .\hotstuff\keys\* .\%dirName%\keys\ /s
 
 
-echo ç¼–è¯‘hotstuff...
+echo ±àÒëhotstuff...
 cd .\hotstuff
 del .\hotstuffserver%exeSuffix% 
 del .\hotstuffclient%exeSuffix% 
@@ -56,13 +58,13 @@ go build -o .\hotstuffserver%exeSuffix% .\cmd\hotstuffserver\main.go
 go build -o .\hotstuffclient%exeSuffix% .\cmd\hotstuffclient\main.go
 cd ..
 
-echo æ‹·è´hotstuff...
+echo ¿½±´hotstuff...
 copy .\hotstuff\hotstuffclient%exeSuffix% .\%dirName%
 copy .\hotstuff\hotstuffserver%exeSuffix% .\%dirName%
 copy .\hotstuff\hotstuff.toml .\%dirName%
 
 
-echo ç¼–è¯‘pbft...
+echo ±àÒëpbft...
 cd .\pbft
 del .\pbftserver%exeSuffix% 
 del .\pbftclient%exeSuffix% 
@@ -70,13 +72,13 @@ go build -o .\pbftserver%exeSuffix% .\cmd\pbftserver\main.go
 go build -o .\pbftclient%exeSuffix% .\cmd\pbftclient\main.go
 cd ..
 
-echo æ‹·è´pbft...
+echo ¿½±´pbft...
 copy .\pbft\pbftclient%exeSuffix% .\%dirName%
 copy .\pbft\pbftserver%exeSuffix% .\%dirName%
 copy .\pbft\pbft.toml .\%dirName%
 
 
-echo ç¼–è¯‘pbftlinear...
+echo ±àÒëpbftlinear...
 cd .\pbftlinear
 del .\pbftlinearserver%exeSuffix% 
 del .\pbftlinearclient%exeSuffix% 
@@ -84,13 +86,13 @@ go build -o .\pbftlinearserver%exeSuffix% .\cmd\pbftlinearserver\main.go
 go build -o .\pbftlinearclient%exeSuffix% .\cmd\pbftlinearclient\main.go
 cd ..
 
-echo æ‹·è´pbftlinear...
+echo ¿½±´pbftlinear...
 copy .\pbftlinear\pbftlinearclient%exeSuffix% .\%dirName%
 copy .\pbftlinear\pbftlinearserver%exeSuffix% .\%dirName%
 copy .\pbftlinear\pbftlinear.toml .\%dirName%
 
 
-echo ç¼–è¯‘lbbft...
+echo ±àÒëlbbft...
 cd .\lbbft
 del .\lbbftserver%exeSuffix% 
 del .\lbbftclient%exeSuffix% 
@@ -98,7 +100,7 @@ go build -o .\lbbftserver%exeSuffix% .\cmd\lbbftserver\main.go
 go build -o .\lbbftclient%exeSuffix% .\cmd\lbbftclient\main.go
 cd ..
 
-echo æ‹·è´lbbft...
+echo ¿½±´lbbft...
 copy .\lbbft\lbbftclient%exeSuffix% .\%dirName%
 copy .\lbbft\lbbftserver%exeSuffix% .\%dirName%
 copy .\lbbft\lbbft.toml .\%dirName%
@@ -107,5 +109,5 @@ copy .\lbbft\lbbft.toml .\%dirName%
 echo %dirName%.zip...
 Bandizip.exe  a -r -l:5 %dirName%.zip %dirName%\*
 
-echo æ‰“åŒ…å®Œæˆ...
+echo ´ò°üÍê³É...
 
