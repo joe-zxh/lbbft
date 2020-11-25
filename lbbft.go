@@ -268,10 +268,9 @@ func (lbbft *LBBFT) BroadcastPrePrepareRequest(pPP *proto.PrePrepareArgs, ent *d
 				}
 				dPS := pPPR.Sig.Proto2PartialSig()
 				ent.Mut.Lock()
-				if ent.Prepared == false &&
-					lbbft.SigCache.VerifySignature(*dPS, ent.GetPrepareHash()) {
+				if ent.Prepared == false {
 					ent.PreparedCert.Sigs[id] = *dPS
-					if len(ent.PreparedCert.Sigs) > int(2*lbbft.F) {
+					if len(ent.PreparedCert.Sigs) > int(2*lbbft.F) && lbbft.SigCache.VerifyQuorumCert(ent.PreparedCert) {
 
 						// collector先处理自己的entry的commit的签名
 						ent.Prepared = true
@@ -328,10 +327,9 @@ func (lbbft *LBBFT) BroadcastPrepareRequest(pP *proto.PrepareArgs, ent *data.Ent
 				}
 				dPS := pPR.Sig.Proto2PartialSig()
 				ent.Mut.Lock()
-				if ent.Committed == false &&
-					lbbft.SigCache.VerifySignature(*dPS, ent.GetCommitHash()) {
+				if ent.Committed == false {
 					ent.CommittedCert.Sigs[id] = *dPS
-					if len(ent.CommittedCert.Sigs) > int(2*lbbft.F) {
+					if len(ent.CommittedCert.Sigs) > int(2*lbbft.F) && lbbft.SigCache.VerifyQuorumCert(ent.CommittedCert) {
 
 						ent.Committed = true
 

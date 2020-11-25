@@ -56,6 +56,7 @@ type options struct {
 		Pubkey     string
 		Cert       string
 	}
+	ClusterSize uint32
 }
 
 func usage() {
@@ -168,6 +169,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to unmarshal config: %v\n", err)
 		os.Exit(1)
 	}
+	conf.ClusterSize = uint32(*clusterSize)
 
 	log.Printf("replica %d starts", conf.SelfID)
 
@@ -396,7 +398,7 @@ func (srv *lbbftServer) ExecCommand(_ context.Context, cmd *client.Command, out 
 	srv.mut.Unlock()
 
 	// if srv.lbbft.IsLeader {
-	if srv.lbbft.ID == (uint32(cmd.SequenceNumber)-1)%4+1 {
+	if srv.lbbft.ID == (uint32(cmd.SequenceNumber)-1)%srv.conf.ClusterSize+1 {
 		// fmt.Printf("ID: %d, seq: %d\n", srv.lbbft.ID, cmd.SequenceNumber)
 		cmd.Data = srv.getPayloadData(cmd.PayloadSize)
 
