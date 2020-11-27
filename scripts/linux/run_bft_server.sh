@@ -26,8 +26,11 @@ trap 'trap - SIGTERM && kill -- -$$' SIGINT SIGTERM EXIT
 # 启动程序
 for((i=1;i<=$clusterSize;i++));  
 do
-    $bin --tls=true --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize  >> $log_dir/$i.out 2>&1 "$@" &
+    $bin --tls=true --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize --batch-size 30  >> $log_dir/$i.out 2>&1 "$@" &
     echo $!
+    if [ $i -eq 1 ]; then
+        leaderpid=$!
+    fi
     if [ $cpuPer -ne 0 ]; then
         start=$(expr $cpuTotal - $cpuPer \* $(expr $clusterSize - $i + 1));
         end=$(expr $start + $cpuPer - 1);
@@ -37,6 +40,7 @@ do
     fi    
 done  
 
+echo leaderpid: $leaderpid
 
 for((i=1;i<=$clusterSize;i++));  
 do

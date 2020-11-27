@@ -37,6 +37,7 @@ md %dirName%\keys
 if "%1%"=="Linux" (
     echo ¿½±´Linux°æ±¾½Å±¾...
     copy .\lbbft\scripts\linux\*.sh .\%dirName%
+    copy .\lbbft\cmrecorder .\%dirName%
 ) else if "%1%"=="Win" (
     md %dirName%\scripts
     echo ¿½±´windows°æ±¾½Å±¾...

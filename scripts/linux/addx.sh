@@ -1,5 +1,7 @@
 #!/bin/bash
 
+chmod +x ./cmrecorder
+
 chmod +x ./hotstuffclient
 chmod +x ./hotstuffserver
 
