@@ -2,19 +2,13 @@ package lbbft
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/sha512"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/joe-zxh/lbbft/data"
 	"github.com/joe-zxh/lbbft/util"
 	"log"
-	"math/big"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -24,7 +18,6 @@ import (
 	"github.com/joe-zxh/lbbft/internal/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 )
 
 var logger *log.Logger
@@ -492,72 +485,4 @@ func newLBBFTServer(lbbft *LBBFT) *lbbftServer {
 		clients: make(map[context.Context]config.ReplicaID),
 	}
 	return pbftSrv
-}
-
-func (lbbft *lbbftServer) getClientID(ctx context.Context) (config.ReplicaID, error) {
-	lbbft.mut.RLock()
-	// fast path for known stream
-	if id, ok := lbbft.clients[ctx]; ok {
-		lbbft.mut.RUnlock()
-		return id, nil
-	}
-
-	lbbft.mut.RUnlock()
-	lbbft.mut.Lock()
-	defer lbbft.mut.Unlock()
-
-	// cleanup finished streams
-	for ctx := range lbbft.clients {
-		if ctx.Err() != nil {
-			delete(lbbft.clients, ctx)
-		}
-	}
-
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return 0, fmt.Errorf("getClientID: metadata not available")
-	}
-
-	v := md.Get("id")
-	if len(v) < 1 {
-		return 0, fmt.Errorf("getClientID: id field not present")
-	}
-
-	id, err := strconv.Atoi(v[0])
-	if err != nil {
-		return 0, fmt.Errorf("getClientID: cannot parse ID field: %w", err)
-	}
-
-	info, ok := lbbft.Config.Replicas[config.ReplicaID(id)]
-	if !ok {
-		return 0, fmt.Errorf("getClientID: could not find info about id '%d'", id)
-	}
-
-	v = md.Get("proof")
-	if len(v) < 2 {
-		return 0, fmt.Errorf("getClientID: No proof found")
-	}
-
-	var R, S big.Int
-	v0, err := base64.StdEncoding.DecodeString(v[0])
-	if err != nil {
-		return 0, fmt.Errorf("getClientID: could not decode proof: %v", err)
-	}
-	v1, err := base64.StdEncoding.DecodeString(v[1])
-	if err != nil {
-		return 0, fmt.Errorf("getClientID: could not decode proof: %v", err)
-	}
-	R.SetBytes(v0)
-	S.SetBytes(v1)
-
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], uint32(lbbft.Config.ID))
-	hash := sha512.Sum512(b[:])
-
-	if !ecdsa.Verify(info.PubKey, hash[:], &R, &S) {
-		return 0, fmt.Errorf("Invalid proof")
-	}
-
-	lbbft.clients[ctx] = config.ReplicaID(id)
-	return config.ReplicaID(id), nil
 }
