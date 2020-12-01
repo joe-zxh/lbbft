@@ -11,7 +11,6 @@ import (
 	"github.com/joe-zxh/lbbft/config"
 	"github.com/joe-zxh/lbbft/data"
 	"github.com/joe-zxh/lbbft/internal/logging"
-	"github.com/joe-zxh/lbbft/util"
 )
 
 const (
@@ -48,19 +47,18 @@ type LBBFTCore struct {
 	LogMut sync.Mutex
 
 	// Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
-	cps        map[int]*CheckPoint
-	WaterLow   uint32
-	WaterHigh  uint32
-	F          uint32
-	Q          uint32
-	N          uint32
-	monitor    bool
-	Change     *time.Timer
-	Changing   bool                // Indicate if this node is changing view
-	state      interface{}         // Deterministic state machine's state
-	ApplyQueue *util.PriorityQueue // 因为PBFT的特殊性(log是一个map，而不是list)，所以这里需要一个applyQueue。
-	vcs        map[uint32][]*ViewChangeArgs
-	lastcp     uint32
+	cps       map[int]*CheckPoint
+	WaterLow  uint32
+	WaterHigh uint32
+	F         uint32
+	Q         uint32
+	N         uint32
+	monitor   bool
+	Change    *time.Timer
+	Changing  bool        // Indicate if this node is changing view
+	state     interface{} // Deterministic state machine's state
+	vcs       map[uint32][]*ViewChangeArgs
+	lastcp    uint32
 
 	Leader   uint32 // view改变的时候，再改变
 	IsLeader bool   // view改变的时候，再改变
@@ -129,22 +127,21 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		Exec:     make(chan []data.Command, 1),
 
 		// lbbft
-		ID:         uint32(conf.ID),
-		seqmap:     make(map[data.EntryID]uint32),
-		View:       1,
-		Apply:      0,
-		cps:        make(map[int]*CheckPoint),
-		WaterLow:   0,
-		WaterHigh:  2 * checkpointDiv,
-		F:          uint32(len(conf.Replicas)-1) / 3,
-		N:          uint32(len(conf.Replicas)),
-		monitor:    false,
-		Change:     nil,
-		Changing:   false,
-		state:      make([]interface{}, 1),
-		ApplyQueue: util.NewPriorityQueue(),
-		vcs:        make(map[uint32][]*ViewChangeArgs),
-		lastcp:     0,
+		ID:        uint32(conf.ID),
+		seqmap:    make(map[data.EntryID]uint32),
+		View:      1,
+		Apply:     0,
+		cps:       make(map[int]*CheckPoint),
+		WaterLow:  0,
+		WaterHigh: 2 * checkpointDiv,
+		F:         uint32(len(conf.Replicas)-1) / 3,
+		N:         uint32(len(conf.Replicas)),
+		monitor:   false,
+		Change:    nil,
+		Changing:  false,
+		state:     make([]interface{}, 1),
+		vcs:       make(map[uint32][]*ViewChangeArgs),
+		lastcp:    0,
 	}
 
 	lbbft.InitLog()

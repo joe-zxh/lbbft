@@ -486,35 +486,6 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 	return &empty.Empty{}, nil
 }
 
-func (lbbft *LBBFT) ApplyCommands2(elem *util.PQElem) {
-	lbbft.Mut.Lock()
-	inserted := lbbft.ApplyQueue.Insert(*elem)
-	if !inserted {
-		panic("Already insert some request with same sequence")
-	}
-
-	for i, sz := 0, lbbft.ApplyQueue.Length(); i < sz; i++ { // commit需要按global seq的顺序
-		m, err := lbbft.ApplyQueue.GetMin()
-		if err != nil {
-			break
-		}
-		if int(lbbft.Apply+1) == m.Pri {
-			lbbft.Apply++
-			cmds, ok := m.C.([]data.Command)
-			if ok {
-				lbbft.Exec <- cmds
-			}
-			lbbft.ApplyQueue.ExtractMin()
-
-		} else if int(lbbft.Apply+1) > m.Pri {
-			panic("This should already done")
-		} else {
-			break
-		}
-	}
-	lbbft.Mut.Unlock()
-}
-
 func newLBBFTServer(lbbft *LBBFT) *lbbftServer {
 	pbftSrv := &lbbftServer{
 		LBBFT:   lbbft,

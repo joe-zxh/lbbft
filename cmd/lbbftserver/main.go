@@ -408,7 +408,7 @@ func (srv *lbbftServer) ExecCommand(_ context.Context, cmd *client.Command, out 
 			out(nil, status.Errorf(codes.InvalidArgument, "Failed to marshal command: %v", err))
 		}
 		srv.lbbft.AddCommand(data.Command(b))
-		srv.lbbft.Propose(false)
+		go srv.lbbft.Propose(false)
 	}
 
 	go func(id cmdID, finished chan struct{}) {

@@ -60,8 +60,8 @@ go build -o .\hotstuffclient%exeSuffix% .\cmd\hotstuffclient\main.go
 cd ..
 
 echo øΩ±¥hotstuff...
-copy .\hotstuff\hotstuffclient%exeSuffix% .\%dirName%
 copy .\hotstuff\hotstuffserver%exeSuffix% .\%dirName%
+copy .\hotstuff\hotstuffclient%exeSuffix% .\%dirName%
 copy .\hotstuff\hotstuff.toml .\%dirName%
 
 
@@ -69,13 +69,16 @@ echo ±‡“Îpbft...
 cd .\pbft
 del .\pbftserver%exeSuffix% 
 del .\pbftclient%exeSuffix% 
+del .\pbftvcclient%exeSuffix% 
 go build -o .\pbftserver%exeSuffix% .\cmd\pbftserver\main.go
 go build -o .\pbftclient%exeSuffix% .\cmd\pbftclient\main.go
+go build -o .\pbftvcclient%exeSuffix% .\cmd\pbftvcclient\main.go
 cd ..
 
 echo øΩ±¥pbft...
-copy .\pbft\pbftclient%exeSuffix% .\%dirName%
 copy .\pbft\pbftserver%exeSuffix% .\%dirName%
+copy .\pbft\pbftclient%exeSuffix% .\%dirName%
+copy .\pbft\pbftvcclient%exeSuffix% .\%dirName%
 copy .\pbft\pbft.toml .\%dirName%
 
 
@@ -88,8 +91,8 @@ go build -o .\pbftlinearclient%exeSuffix% .\cmd\pbftlinearclient\main.go
 cd ..
 
 echo øΩ±¥pbftlinear...
-copy .\pbftlinear\pbftlinearclient%exeSuffix% .\%dirName%
 copy .\pbftlinear\pbftlinearserver%exeSuffix% .\%dirName%
+copy .\pbftlinear\pbftlinearclient%exeSuffix% .\%dirName%
 copy .\pbftlinear\pbftlinear.toml .\%dirName%
 
 
@@ -102,8 +105,8 @@ go build -o .\lbbftclient%exeSuffix% .\cmd\lbbftclient\main.go
 cd ..
 
 echo øΩ±¥lbbft...
-copy .\lbbft\lbbftclient%exeSuffix% .\%dirName%
 copy .\lbbft\lbbftserver%exeSuffix% .\%dirName%
+copy .\lbbft\lbbftclient%exeSuffix% .\%dirName%
 copy .\lbbft\lbbft.toml .\%dirName%
 
 
