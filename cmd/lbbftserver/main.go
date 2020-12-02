@@ -91,7 +91,7 @@ func main() {
 	pflag.Bool("print-commands", false, "Commands will be printed to stdout")
 	pflag.Bool("print-throughput", false, "Throughput measurements will be printed stdout")
 	pflag.Int("interval", 1000, "Throughput measurement interval in milliseconds")
-	pflag.Bool("tls", false, "Enable TLS")
+	pflag.Bool("tls", true, "Enable TLS")
 	pflag.String("client-listen", "", "Override the listen address for the client server")
 	pflag.String("peer-listen", "", "Override the listen address for the replica (peer) server")
 	clusterSize := pflag.Int("cluster-size", 4, "specify the size of the cluster")
@@ -263,7 +263,8 @@ func main() {
 		replicaConfig.Replicas[r.ID] = info
 	}
 	replicaConfig.ClusterSize = len(replicaConfig.Replicas)
-	replicaConfig.QuorumSize = 2*((len(replicaConfig.Replicas)-1)/3) + 1 // pbft: 2f+1
+	f := (replicaConfig.ClusterSize - 1) / 3
+	replicaConfig.QuorumSize = (replicaConfig.ClusterSize+f)/2 + 1 // lbbft: q>(n+f)/2
 
 	srv := newLBBFTServer(&conf, replicaConfig)
 	err = srv.Start(clientAddress)
@@ -408,7 +409,7 @@ func (srv *lbbftServer) ExecCommand(_ context.Context, cmd *client.Command, out 
 			out(nil, status.Errorf(codes.InvalidArgument, "Failed to marshal command: %v", err))
 		}
 		srv.lbbft.AddCommand(data.Command(b))
-		go srv.lbbft.Propose(false)
+		srv.lbbft.Propose(false)
 	}
 
 	go func(id cmdID, finished chan struct{}) {
@@ -421,6 +422,23 @@ func (srv *lbbftServer) ExecCommand(_ context.Context, cmd *client.Command, out 
 		// send response
 		out(&client.Empty{}, nil)
 	}(id, finished)
+}
+
+func (srv *lbbftServer) AskViewChange(_ context.Context, _ *client.Empty, out func(*client.Empty, error)) {
+
+	if srv.lbbft.IsLeader {
+		srv.lbbft.StartViewChange()
+	}
+
+	<-srv.lbbft.ViewChangeChan
+
+	// send response
+	out(&client.Empty{}, nil)
+}
+
+func (srv *lbbftServer) RoundTrip(_ context.Context, _ *client.Empty, out func(*client.Empty, error)) {
+	// send response
+	out(&client.Empty{}, nil)
 }
 
 func (srv *lbbftServer) onExec() {

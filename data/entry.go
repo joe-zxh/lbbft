@@ -26,6 +26,22 @@ type EntryID struct {
 	N uint32
 }
 
+func (id1 *EntryID) IsOlder(id2 *EntryID) bool {
+	if (id1.V == id2.V && id1.N < id2.N) || id1.V < id2.V {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (id1 *EntryID) IsOlderOrEqual(id2 *EntryID) bool {
+	if (id1.V == id2.V && id1.N <= id2.N) || id1.V < id2.V {
+		return true
+	} else {
+		return false
+	}
+}
+
 type Entry struct {
 	Mut sync.Mutex
 	PP  *PrePrepareArgs
@@ -38,7 +54,7 @@ type Entry struct {
 
 	PreEntryHash *EntryHash
 	Digest       *EntryHash
-	PrepareHash  *EntryHash // 签名内容：hash("prepare"+Digest)
+	PrepareHash  *EntryHash // 签名内容：hash(view+seq+"prepare"+Digest) // 加入view和seq，是为了view change的时候，只发送Digest和PrepareHash，而不发送整个PP
 	CommitHash   *EntryHash // 签名内容: hash(“commit”+PrepareHash) // 因为有些节点先收到P再收到PP，没有Digest，所以用的是PrepareHash
 }
 
@@ -97,6 +113,14 @@ func (e *Entry) GetPrepareHash() EntryHash {
 	}
 
 	s512 := sha512.New()
+
+	byte4 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(byte4, uint32(e.PP.View))
+	s512.Write(byte4[:])
+
+	binary.LittleEndian.PutUint32(byte4, uint32(e.PP.Seq))
+	s512.Write(byte4[:])
+
 	s512.Write([]byte("prepare"))
 	s512.Write(e.GetDigest().ToSlice())
 

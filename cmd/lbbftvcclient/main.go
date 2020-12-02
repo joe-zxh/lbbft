@@ -1,3 +1,4 @@
+// client for view change
 package main
 
 import (
@@ -8,13 +9,9 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"math"
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/pprof"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,9 +23,6 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type options struct {
@@ -51,7 +45,7 @@ type options struct {
 func usage() {
 	fmt.Printf("Usage: %s [options]\n", os.Args[0])
 	fmt.Println()
-	fmt.Println("Loads configuration from ./lbbft.toml")
+	fmt.Println("Loads configuration from ./pbft.toml")
 	fmt.Println()
 	fmt.Println("Options:")
 	pflag.PrintDefaults()
@@ -64,34 +58,17 @@ func main() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	help := pflag.BoolP("help", "h", false, "Prints this text.")
-	cpuprofile := pflag.String("cpuprofile", "", "File to write CPU profile to")
-	memprofile := pflag.String("memprofile", "", "File to write memory profile to")
 	pflag.Uint32("self-id", 0, "The id for this replica.")
-	pflag.Int("rate-limit", 0, "Limit the request-rate to approximately (in requests per second).")
-	pflag.Int("payload-size", 0, "The size of the payload in bytes")
-	pflag.Uint64("max-inflight", 10000, "The maximum number of messages that the client can wait for at once") // 用来控制客戶端的个数的
-	pflag.String("input", "", "Optional file to use for payload data")                                         // client请求的负载
-	pflag.Bool("benchmark", false, "If enabled, a BenchmarkData protobuf will be written to stdout.")
-	pflag.Int("exit-after", 0, "Number of seconds after which the program should exit.")
+	pflag.Int("payload-size", 30, "The size of the payload in bytes")
 	pflag.Bool("tls", true, "Enable TLS")
 	clusterSize := pflag.Int("cluster-size", 4, "specify the size of the cluster")
+	prepareNum := pflag.Int("prepare-num", 10, "specify the number of prepare entries before view changes...")
+	viewchangeNum := pflag.Int("viewchange-num", 10, "specify the number of view changes for experiment...")
 	pflag.Parse()
 
 	if *help {
 		pflag.Usage()
 		os.Exit(0)
-	}
-
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal("Could not create CPU profile: ", err)
-		}
-		defer f.Close()
-		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("Could not start CPU profile: ", err)
-		}
-		defer pprof.StopCPUProfile()
 	}
 
 	viper.BindPFlags(pflag.CommandLine)
@@ -163,58 +140,18 @@ func main() {
 		cancel()
 	}()
 
-	err = client.SendCommands(ctx)
+	err = client.SendViewChangeCommands(ctx, *prepareNum, *viewchangeNum)
 	if err != nil && !errors.Is(err, io.EOF) {
 		fmt.Fprintf(os.Stderr, "Failed to send commands: %v\n", err)
 		client.Close()
 		os.Exit(1)
 	}
 	client.Close()
-
-	stats := client.GetStats()
-	throughput := stats.Throughput
-	latency := stats.LatencyAvg / float64(time.Millisecond)
-	latencySD := math.Sqrt(stats.LatencyVar) / float64(time.Millisecond)
-
-	if stats.TotalOps == conf.MaxInflight {
-		fmt.Println(`Warning: 可能一个完成的请求都没有`)
-	}
-
-	if !conf.Benchmark {
-		fmt.Printf("Throughput (ops/sec): %.2f, Latency (ms): %.2f, Latency Std.dev (ms): %.2f\n",
-			throughput,
-			latency,
-			latencySD,
-		)
-	} else {
-		client.data.MeasuredThroughput = throughput
-		client.data.MeasuredLatency = latency
-		client.data.LatencyVariance = math.Pow(latencySD, 2) // variance in ms^2
-		b, err := proto.Marshal(client.data)
-		if err != nil {
-			log.Fatalf("Could not marshal benchmarkdata: %v\n", err)
-		}
-		_, err = os.Stdout.Write(b)
-		if err != nil {
-			log.Fatalf("Could not write data: %v\n", err)
-		}
-	}
-
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Fatal("could not create memory profile: ", err)
-		}
-		defer f.Close() // error handling omitted for example
-		runtime.GC()    // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Fatal("could not write memory profile: ", err)
-		}
-	}
 }
 
 type qspec struct {
 	faulty int
+	n      int
 }
 
 func (q *qspec) ExecCommandQF(_ *client.Command, signatures map[uint32]*client.Empty) (*client.Empty, bool) {
@@ -224,13 +161,17 @@ func (q *qspec) ExecCommandQF(_ *client.Command, signatures map[uint32]*client.E
 	return &client.Empty{}, true
 }
 
-// 只可以由vcclient使用
 func (q *qspec) AskViewChangeQF(_ *client.Empty, signatures map[uint32]*client.Empty) (*client.Empty, bool) {
+	if len(signatures) < q.n {
+		return nil, false
+	}
 	return &client.Empty{}, true
 }
 
-// 只可以由vcclient使用
 func (q *qspec) RoundTripQF(_ *client.Empty, signatures map[uint32]*client.Empty) (*client.Empty, bool) {
+	if len(signatures) < q.n {
+		return nil, false
+	}
 	return &client.Empty{}, true
 }
 
@@ -267,7 +208,7 @@ func newHotStuffClient(conf *options, replicaConfig *config.ReplicaConfig) (*hot
 		return nil, err
 	}
 	faulty := (len(replicaConfig.Replicas) - 1) / 3
-	gorumsConf, err := mgr.NewConfiguration(mgr.NodeIDs(), &qspec{faulty: faulty})
+	gorumsConf, err := mgr.NewConfiguration(mgr.NodeIDs(), &qspec{faulty: faulty, n: len(replicaConfig.Replicas)})
 	if err != nil {
 		mgr.Close()
 		return nil, err
@@ -298,71 +239,73 @@ func (c *hotstuffClient) Close() {
 	c.reader.Close()
 }
 
-func (c *hotstuffClient) GetStats() *benchmark.Result {
-	return c.stats.GetResult()
-}
+func (c *hotstuffClient) SendViewChangeCommands(ctx context.Context, prepareNum int, viewchangeNum int) error {
 
-func (c *hotstuffClient) SendCommands(ctx context.Context) error {
-	var num uint64 = 1
-	var sleeptime time.Duration
-	if c.conf.RateLimit > 0 {
-		sleeptime = time.Second / time.Duration(c.conf.RateLimit)
-	}
-
-	defer c.stats.End()
-	defer c.wg.Wait()
-	c.stats.Start()
-
-	for {
-		if atomic.LoadUint64(&c.inflight) < c.conf.MaxInflight {
-			atomic.AddUint64(&c.inflight, 1)
-			//data := make([]byte, c.conf.PayloadSize) // 其实用固定的数据也可以，不用每次都生成一遍。
-			//n, err := c.reader.Read(data)
-			//if err != nil {
-			//	return err
-			//}
-			cmd := &client.Command{
-				ClientID:       uint32(c.conf.SelfID),
-				SequenceNumber: num,
-				PayloadSize:    int32(c.conf.PayloadSize),
-				// Data:           data[:n],
-			}
-			now := time.Now()
-			promise := c.gorumsConfig.ExecCommand(ctx, cmd)
-			num++
-
-			c.wg.Add(1)
-			go func(promise *client.FutureEmpty, sendTime time.Time) {
-				_, err := promise.Get()
-				atomic.AddUint64(&c.inflight, ^uint64(0))
-				if err != nil {
-					qcError, ok := err.(client.QuorumCallError)
-					if !ok || qcError.Reason != context.Canceled.Error() {
-						log.Printf("Did not get enough signatures for command: %v\n", err)
-					}
-				}
-				duration := time.Since(sendTime)
-				c.stats.AddLatency(duration)
-				if c.conf.Benchmark {
-					c.data.Stats = append(c.data.Stats, &client.CommandStats{
-						StartTime: timestamppb.New(sendTime),
-						Duration:  durationpb.New(duration),
-					})
-				}
-				c.wg.Done()
-			}(promise, now)
-		}
-
-		if c.conf.RateLimit > 0 {
-			time.Sleep(sleeptime)
-		}
-
-		err := ctx.Err()
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
+	// 先获取round-trip的时间
+	roundtripNum := 1000
+	var rrtTotal time.Duration
+	var i int
+	for i = 0; i < roundtripNum; i++ {
+		start := time.Now()
+		promise := c.gorumsConfig.RoundTrip(ctx, &client.Empty{})
+		_, err := promise.Get()
+		duration := time.Since(start)
+		rrtTotal = rrtTotal + duration
 		if err != nil {
-			return err
+			qcError, ok := err.(client.QuorumCallError)
+			if !ok || qcError.Reason != context.Canceled.Error() {
+				log.Printf("Did not get enough signatures for command: %v\n", err)
+			}
+			break
 		}
 	}
+	rtt := float64(rrtTotal.Milliseconds()) / float64(i)
+	log.Printf("round trip time: %vms\n", rtt)
+
+	for i := 1; i <= prepareNum; i++ {
+		cmd := &client.Command{
+			ClientID:       uint32(c.conf.SelfID),
+			SequenceNumber: uint64(i),
+			PayloadSize:    int32(c.conf.PayloadSize),
+			// Data:           data[:n],
+		}
+
+		promise := c.gorumsConfig.ExecCommand(ctx, cmd)
+
+		c.wg.Add(1)
+		go func(promise *client.FutureEmpty) {
+			_, err := promise.Get()
+			if err != nil {
+				qcError, ok := err.(client.QuorumCallError)
+				if !ok || qcError.Reason != context.Canceled.Error() {
+					log.Printf("Did not get enough signatures for command: %v\n", err)
+				}
+			}
+			c.wg.Done()
+		}(promise)
+	}
+	c.wg.Wait()
+	if prepareNum > 0 {
+		time.Sleep(3 * time.Second) // 等待server集群稳定
+	}
+	log.Printf("log replication for %d entries complete, start view change...\n", prepareNum)
+
+	var totalDuration time.Duration
+	for i = 0; i < viewchangeNum; i++ {
+		start := time.Now()
+		promise := c.gorumsConfig.AskViewChange(ctx, &client.Empty{})
+		_, err := promise.Get()
+		duration := time.Since(start)
+		totalDuration = totalDuration + duration
+		if err != nil {
+			qcError, ok := err.(client.QuorumCallError)
+			if !ok || qcError.Reason != context.Canceled.Error() {
+				log.Printf("Did not get enough signatures for command: %v\n", err)
+			}
+			break
+		}
+	}
+
+	log.Printf("prepare num: %d, view change num: %d, view change average time: %vms\n", prepareNum, i, float64(totalDuration.Milliseconds())/float64(i))
+	return nil
 }

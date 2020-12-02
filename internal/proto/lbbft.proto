@@ -7,6 +7,7 @@ import "google/protobuf/empty.proto";
 option go_package = "github.com/joe-zxh/lbbft/internal/proto";
 
 service LBBFT {
+  // log replication...
   rpc Ordering(OrderingArgs) returns (OrderingReply) {
   }
 
@@ -18,9 +19,40 @@ service LBBFT {
 
   rpc Commit(CommitArgs) returns (google.protobuf.Empty) {
   }
+
+  // view change...
+  rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply) {
+  }
+
+  rpc NewView(NewViewArgs) returns (NewViewReply) {
+  }
 }
 
-message OrderingArgs { // request commands
+message RequestVoteArgs {
+  uint32 CandidateID = 1; // only for simpicity, one should get the id from the communication protocol, rather than send it explicitly in the arguments.
+  uint32 NewView = 2;
+  uint32 LastPreparedView = 3;
+  uint32 LastPreparedSeq = 4;
+  bytes Digest = 5; // 用来验证PreparedCert里面的PrepareHash是否=hash(view+seq+"prepare"+Digest)
+  QuorumCert PreparedCert = 6;
+}
+
+message RequestVoteReply {
+  PartialSig Sig = 1; // sig content就是: view+candidate id
+}
+
+message NewViewArgs {
+  uint32 NewView = 1;
+  uint32 CandidateID = 2; // only for simpicity, one should get the id from the communication protocol, rather than send it explicitly in the arguments.
+  QuorumCert NewViewCert = 3;
+}
+
+message NewViewReply {// 作为处理log inconsistency的开始...
+  uint32 View = 1;
+  uint32 Seq = 2;
+}
+
+message OrderingArgs {// request commands
   repeated Command Commands = 1;
 }
 

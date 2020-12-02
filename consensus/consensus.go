@@ -1,8 +1,13 @@
 package consensus
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/binary"
 	"fmt"
+	"github.com/joe-zxh/lbbft/internal/proto"
+	"github.com/joe-zxh/lbbft/util"
 	"go.uber.org/atomic"
 	"log"
 	"sync"
@@ -35,16 +40,17 @@ type LBBFTCore struct {
 
 	Exec chan []data.Command
 
-	// from lbbft
-	Mut    sync.Mutex // Lock for all internal data
-	ID     uint32
-	TSeq   atomic.Uint32           // Total sequence number of next request
-	seqmap map[data.EntryID]uint32 // Use to map {Cid,CSeq} to global sequence number for all prepared message
-	View   uint32
-	Apply  uint32 // Sequence number of last executed request
+	// from pbft
+	Mut   sync.Mutex // Lock for all internal data
+	ID    uint32
+	TSeq  atomic.Uint32 // Total sequence number of next request
+	View  uint32        // View和Seq都是从1开始的
+	Apply uint32        // Sequence number of last executed request
 
-	Log    []*data.Entry
-	LogMut sync.Mutex
+	Log                   []*data.Entry
+	LogMut                sync.Mutex
+	LastPreparedID        data.EntryID
+	UpdateLastPreparedMut sync.Mutex
 
 	// Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
 	cps       map[int]*CheckPoint
@@ -63,7 +69,8 @@ type LBBFTCore struct {
 	Leader   uint32 // view改变的时候，再改变
 	IsLeader bool   // view改变的时候，再改变
 
-	waitEntry *sync.Cond
+	waitEntry      *sync.Cond
+	ViewChangeChan chan struct{}
 }
 
 func (lbbft *LBBFTCore) AddCommand(command data.Command) {
@@ -92,7 +99,7 @@ func (lbbft *LBBFTCore) InitLog() {
 	lbbft.LogMut.Lock()
 	defer lbbft.LogMut.Unlock()
 	dPP := data.PrePrepareArgs{
-		View:     1,
+		View:     0,
 		Seq:      0,
 		Commands: nil,
 	}
@@ -126,9 +133,8 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		cmdCache: data.NewCommandSet(),
 		Exec:     make(chan []data.Command, 1),
 
-		// lbbft
+		// from pbft
 		ID:        uint32(conf.ID),
-		seqmap:    make(map[data.EntryID]uint32),
 		View:      1,
 		Apply:     0,
 		cps:       make(map[int]*CheckPoint),
@@ -142,14 +148,17 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 		state:     make([]interface{}, 1),
 		vcs:       make(map[uint32][]*ViewChangeArgs),
 		lastcp:    0,
+
+		LastPreparedID: data.EntryID{V: 0, N: 0},
+		ViewChangeChan: make(chan struct{}, 1),
 	}
 
 	lbbft.InitLog()
 
 	lbbft.waitEntry = sync.NewCond(&lbbft.LogMut)
 
-	lbbft.Q = lbbft.F*2 + 1
-	lbbft.Leader = (lbbft.View-1)%lbbft.N + 1
+	lbbft.Q = (lbbft.F+lbbft.N)/2 + 1
+	lbbft.Leader = 1
 	lbbft.IsLeader = (lbbft.Leader == lbbft.ID)
 
 	// Put an initial stable checkpoint
@@ -233,4 +242,94 @@ func (lbbft *LBBFTCore) ApplyCommands(commitSeq uint32) {
 			break
 		}
 	}
+}
+
+func (lbbft *LBBFTCore) UpdateLastPreparedID(ent *data.Entry) {
+	lbbft.UpdateLastPreparedMut.Lock()
+	defer lbbft.UpdateLastPreparedMut.Unlock()
+
+	if lbbft.LastPreparedID.IsOlder(&data.EntryID{V: ent.PP.View, N: ent.PP.Seq}) {
+		lbbft.LastPreparedID.V = ent.PP.View
+		lbbft.LastPreparedID.N = ent.PP.Seq
+	}
+}
+
+func (lbbft *LBBFTCore) IsRequestVotePreparedCertValid(pRV *proto.RequestVoteArgs) bool {
+
+	if !lbbft.SigCache.VerifyQuorumCert(pRV.PreparedCert.Proto2QuorumCert()) {
+		return false
+	}
+
+	// 检查sigContent是否=hash(view+seq+"prepare"+Digest)
+	var dDigest data.EntryHash
+	copy(dDigest[:], pRV.Digest[:len(dDigest)])
+
+	s512 := sha512.New()
+
+	byte4 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(byte4, uint32(pRV.LastPreparedView))
+	s512.Write(byte4[:])
+
+	binary.LittleEndian.PutUint32(byte4, uint32(pRV.LastPreparedSeq))
+	s512.Write(byte4[:])
+
+	s512.Write([]byte("prepare"))
+	s512.Write(pRV.Digest)
+
+	sum := s512.Sum(nil)
+
+	if bytes.Equal(sum, pRV.PreparedCert.SigContent) {
+		return true
+	} else {
+		panic("IsRequestVotePreparedCertValid: check prepare hash do not pass...")
+	}
+
+	return false
+}
+
+func (lbbft *LBBFTCore) IsNewViewCertValid(pNV *proto.NewViewArgs) bool {
+
+	if !lbbft.SigCache.VerifyQuorumCert(pNV.NewViewCert.Proto2QuorumCert()) {
+		log.Println(`VerifyQuorumCert failed...`)
+		return false
+	}
+
+	// 检查sigContent是否=hash(view+candidate id)
+	s512 := sha512.New()
+
+	byte4 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(byte4, uint32(pNV.NewView))
+	s512.Write(byte4[:])
+
+	binary.LittleEndian.PutUint32(byte4, uint32(pNV.CandidateID))
+	s512.Write(byte4[:])
+
+	sum := s512.Sum(nil)
+
+	if bytes.Equal(sum, pNV.NewViewCert.SigContent) {
+		return true
+	} else {
+		panic("IsNewViewCertValid: sigContent不等于hash(view+candidate id)...")
+	}
+
+	return false
+}
+
+// return sig, sigcontent
+func (lbbft *LBBFTCore) CreateRequestVoteReplySig(pRV *proto.RequestVoteArgs) (*proto.PartialSig, *([]byte)) {
+
+	s512 := sha512.New()
+
+	byte4 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(byte4, uint32(pRV.NewView))
+	s512.Write(byte4[:])
+
+	binary.LittleEndian.PutUint32(byte4, uint32(pRV.CandidateID))
+	s512.Write(byte4[:])
+
+	sum := s512.Sum(nil)
+
+	ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, sum)
+	util.PanicErr(err)
+	return proto.PartialSig2Proto(ps), &sum
 }

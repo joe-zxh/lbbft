@@ -18,10 +18,14 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LBBFTClient interface {
+	// log replication...
 	Ordering(ctx context.Context, in *OrderingArgs, opts ...grpc.CallOption) (*OrderingReply, error)
 	PrePrepare(ctx context.Context, in *PrePrepareArgs, opts ...grpc.CallOption) (*PrePrepareReply, error)
 	Prepare(ctx context.Context, in *PrepareArgs, opts ...grpc.CallOption) (*PrepareReply, error)
 	Commit(ctx context.Context, in *CommitArgs, opts ...grpc.CallOption) (*empty.Empty, error)
+	// view change...
+	RequestVote(ctx context.Context, in *RequestVoteArgs, opts ...grpc.CallOption) (*RequestVoteReply, error)
+	NewView(ctx context.Context, in *NewViewArgs, opts ...grpc.CallOption) (*NewViewReply, error)
 }
 
 type lBBFTClient struct {
@@ -68,14 +72,36 @@ func (c *lBBFTClient) Commit(ctx context.Context, in *CommitArgs, opts ...grpc.C
 	return out, nil
 }
 
+func (c *lBBFTClient) RequestVote(ctx context.Context, in *RequestVoteArgs, opts ...grpc.CallOption) (*RequestVoteReply, error) {
+	out := new(RequestVoteReply)
+	err := c.cc.Invoke(ctx, "/proto.LBBFT/RequestVote", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lBBFTClient) NewView(ctx context.Context, in *NewViewArgs, opts ...grpc.CallOption) (*NewViewReply, error) {
+	out := new(NewViewReply)
+	err := c.cc.Invoke(ctx, "/proto.LBBFT/NewView", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LBBFTServer is the server API for LBBFT service.
 // All implementations must embed UnimplementedLBBFTServer
 // for forward compatibility
 type LBBFTServer interface {
+	// log replication...
 	Ordering(context.Context, *OrderingArgs) (*OrderingReply, error)
 	PrePrepare(context.Context, *PrePrepareArgs) (*PrePrepareReply, error)
 	Prepare(context.Context, *PrepareArgs) (*PrepareReply, error)
 	Commit(context.Context, *CommitArgs) (*empty.Empty, error)
+	// view change...
+	RequestVote(context.Context, *RequestVoteArgs) (*RequestVoteReply, error)
+	NewView(context.Context, *NewViewArgs) (*NewViewReply, error)
 	mustEmbedUnimplementedLBBFTServer()
 }
 
@@ -94,6 +120,12 @@ func (UnimplementedLBBFTServer) Prepare(context.Context, *PrepareArgs) (*Prepare
 }
 func (UnimplementedLBBFTServer) Commit(context.Context, *CommitArgs) (*empty.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
+}
+func (UnimplementedLBBFTServer) RequestVote(context.Context, *RequestVoteArgs) (*RequestVoteReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestVote not implemented")
+}
+func (UnimplementedLBBFTServer) NewView(context.Context, *NewViewArgs) (*NewViewReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NewView not implemented")
 }
 func (UnimplementedLBBFTServer) mustEmbedUnimplementedLBBFTServer() {}
 
@@ -180,6 +212,42 @@ func _LBBFT_Commit_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LBBFT_RequestVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestVoteArgs)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LBBFTServer).RequestVote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.LBBFT/RequestVote",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LBBFTServer).RequestVote(ctx, req.(*RequestVoteArgs))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LBBFT_NewView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NewViewArgs)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LBBFTServer).NewView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.LBBFT/NewView",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LBBFTServer).NewView(ctx, req.(*NewViewArgs))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _LBBFT_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "proto.LBBFT",
 	HandlerType: (*LBBFTServer)(nil),
@@ -199,6 +267,14 @@ var _LBBFT_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Commit",
 			Handler:    _LBBFT_Commit_Handler,
+		},
+		{
+			MethodName: "RequestVote",
+			Handler:    _LBBFT_RequestVote_Handler,
+		},
+		{
+			MethodName: "NewView",
+			Handler:    _LBBFT_NewView_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

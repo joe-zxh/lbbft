@@ -176,77 +176,79 @@ func (lbbft *LBBFT) Propose(timeout bool) {
 		return
 	}
 
-	pOA := proto.Commands2OrderingArgs(cmds) // todo: 如果是leader，其实可以不用转2次。
-
-	var pOR *proto.OrderingReply
-	var err error
-
-	if lbbft.IsLeader {
-		pOR, err = lbbft.Ordering(context.TODO(), pOA)
-		util.PanicErr(err)
-	} else {
-		pOR, err = (*lbbft.nodes[config.ReplicaID(lbbft.Leader)]).Ordering(context.TODO(), pOA)
-		util.PanicErr(err)
-
-		dPP := &data.PrePrepareArgs{
-			View:     lbbft.View,
-			Seq:      pOR.Seq,
-			Commands: cmds,
-		}
-
-		ent := &data.Entry{
-			PP: dPP,
-		}
-
-		ent.Mut.Lock()
-		lbbft.PutEntry(ent)
-		ent.Mut.Unlock()
-	}
-
-	ent := lbbft.GetEntryBySeq(pOR.Seq)
-	ent.Mut.Lock()
-	if ent.PreparedCert != nil {
-		panic(`collector: ent.PreparedCert != nil`)
-	}
-	qc := &data.QuorumCert{
-		Sigs:       make(map[config.ReplicaID]data.PartialSig),
-		SigContent: ent.GetPrepareHash(),
-	}
-	ent.PreparedCert = qc
-
-	ent.Mut.Unlock()
-
 	go func() {
-		leaderPs := *pOR.Sig.Proto2PartialSig()
+		pOA := proto.Commands2OrderingArgs(cmds) // todo: 如果是leader，其实可以不用转2次。
 
-		if !lbbft.IsLeader { // collector的签名
-			ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, qc.SigContent.ToSlice())
-			if err != nil {
-				panic(err)
-			}
+		var pOR *proto.OrderingReply
+		var err error
 
-			// 认证leader的签名
-			if !lbbft.SigCache.VerifySignature(leaderPs, qc.SigContent) {
-				panic(`ordering signature from leader is not correct`)
-			}
-
-			ent.Mut.Lock()
-			ent.PreparedCert.Sigs[lbbft.Config.ID] = *ps                     // collector的签名
-			ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs // leader的签名
-			ent.Mut.Unlock()
+		if lbbft.IsLeader {
+			pOR, err = lbbft.Ordering(context.TODO(), pOA)
+			util.PanicErr(err)
 		} else {
+			pOR, err = (*lbbft.nodes[config.ReplicaID(lbbft.Leader)]).Ordering(context.TODO(), pOA)
+			util.PanicErr(err)
+
+			dPP := &data.PrePrepareArgs{
+				View:     lbbft.View,
+				Seq:      pOR.Seq,
+				Commands: cmds,
+			}
+
+			ent := &data.Entry{
+				PP: dPP,
+			}
+
 			ent.Mut.Lock()
-			ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs
+			lbbft.PutEntry(ent)
 			ent.Mut.Unlock()
 		}
-	}()
 
-	pPP := &proto.PrePrepareArgs{
-		View:     ent.PP.View,
-		Seq:      ent.PP.Seq,
-		Commands: pOA.Commands,
-	}
-	lbbft.BroadcastPrePrepareRequest(pPP, ent)
+		ent := lbbft.GetEntryBySeq(pOR.Seq)
+		ent.Mut.Lock()
+		if ent.PreparedCert != nil {
+			panic(`collector: ent.PreparedCert != nil`)
+		}
+		qc := &data.QuorumCert{
+			Sigs:       make(map[config.ReplicaID]data.PartialSig),
+			SigContent: ent.GetPrepareHash(),
+		}
+		ent.PreparedCert = qc
+
+		ent.Mut.Unlock()
+
+		go func() {
+			leaderPs := *pOR.Sig.Proto2PartialSig()
+
+			if !lbbft.IsLeader { // collector的签名
+				ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, qc.SigContent.ToSlice())
+				if err != nil {
+					panic(err)
+				}
+
+				// 认证leader的签名
+				if !lbbft.SigCache.VerifySignature(leaderPs, qc.SigContent) {
+					panic(`ordering signature from leader is not correct`)
+				}
+
+				ent.Mut.Lock()
+				ent.PreparedCert.Sigs[lbbft.Config.ID] = *ps                     // collector的签名
+				ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs // leader的签名
+				ent.Mut.Unlock()
+			} else {
+				ent.Mut.Lock()
+				ent.PreparedCert.Sigs[config.ReplicaID(lbbft.Leader)] = leaderPs
+				ent.Mut.Unlock()
+			}
+		}()
+
+		pPP := &proto.PrePrepareArgs{
+			View:     ent.PP.View,
+			Seq:      ent.PP.Seq,
+			Commands: pOA.Commands,
+		}
+		lbbft.BroadcastPrePrepareRequest(pPP, ent)
+	}()
 }
 
 func (lbbft *LBBFT) BroadcastPrePrepareRequest(pPP *proto.PrePrepareArgs, ent *data.Entry) {
@@ -263,10 +265,12 @@ func (lbbft *LBBFT) BroadcastPrePrepareRequest(pPP *proto.PrePrepareArgs, ent *d
 				ent.Mut.Lock()
 				if ent.Prepared == false {
 					ent.PreparedCert.Sigs[id] = *dPS
-					if len(ent.PreparedCert.Sigs) > int(2*lbbft.F) && lbbft.SigCache.VerifyQuorumCert(ent.PreparedCert) {
+					if len(ent.PreparedCert.Sigs) >= int(lbbft.Q) && lbbft.SigCache.VerifyQuorumCert(ent.PreparedCert) {
 
 						// collector先处理自己的entry的commit的签名
 						ent.Prepared = true
+						lbbft.UpdateLastPreparedID(ent)
+
 						if ent.CommittedCert != nil {
 							panic(`leader: ent.CommittedCert != nil`)
 						}
@@ -322,7 +326,7 @@ func (lbbft *LBBFT) BroadcastPrepareRequest(pP *proto.PrepareArgs, ent *data.Ent
 				ent.Mut.Lock()
 				if ent.Committed == false {
 					ent.CommittedCert.Sigs[id] = *dPS
-					if len(ent.CommittedCert.Sigs) > int(2*lbbft.F) && lbbft.SigCache.VerifyQuorumCert(ent.CommittedCert) {
+					if len(ent.CommittedCert.Sigs) >= int(lbbft.Q) && lbbft.SigCache.VerifyQuorumCert(ent.CommittedCert) {
 
 						ent.Committed = true
 
@@ -424,6 +428,8 @@ func (lbbft *LBBFT) Prepare(_ context.Context, pP *proto.PrepareArgs) (*proto.Pr
 		ent.Prepared = true
 		ent.PrepareHash = &dQc.SigContent // 这里应该做检查的，如果先收到PP，PHash需要相等。PP那里，如果有PHash和CHash需要检查是否相等。这里简化了。
 
+		lbbft.UpdateLastPreparedID(ent)
+
 		ps, err := lbbft.SigCache.CreatePartialSig(lbbft.Config.ID, lbbft.Config.PrivateKey, ent.GetCommitHash().ToSlice())
 		if err != nil {
 			panic(err)
@@ -477,6 +483,134 @@ func (lbbft *LBBFT) Commit(_ context.Context, pC *proto.CommitArgs) (*empty.Empt
 		lbbft.Mut.Unlock()
 	}
 	return &empty.Empty{}, nil
+}
+
+// view change...
+func (lbbft *LBBFT) StartViewChange() {
+	logger.Printf("StartViewChange: \n")
+
+	lbbft.Mut.Lock()
+	lbbft.View += 1
+
+	ent := lbbft.GetEntryBySeq(lbbft.LastPreparedID.N)
+
+	ent.Mut.Lock()
+	if ent.PP.View != lbbft.LastPreparedID.V {
+		panic(`ent.PP.View!=pbft.LastPreparedID.V`)
+	}
+
+	pRV := &proto.RequestVoteArgs{
+		CandidateID:      lbbft.ID,
+		NewView:          lbbft.View,
+		LastPreparedView: ent.PP.View,
+		LastPreparedSeq:  ent.PP.Seq,
+		Digest:           ent.GetDigest().ToSlice(),
+		PreparedCert:     proto.QuorumCertToProto(ent.PreparedCert),
+	}
+	ent.Mut.Unlock()
+	lbbft.Mut.Unlock()
+
+	// 添加candidate自己的签名
+	sig, sigcontent := lbbft.CreateRequestVoteReplySig(pRV)
+
+	rvqc := &proto.QuorumCert{
+		Sigs:       make([]*proto.PartialSig, 0),
+		SigContent: *sigcontent,
+	}
+
+	rvqc.Sigs = append(rvqc.Sigs, sig)
+
+	lbbft.BroadcastRequestVote(pRV, rvqc)
+}
+
+func (lbbft *LBBFT) BroadcastRequestVote(pRV *proto.RequestVoteArgs, rvqc *proto.QuorumCert) {
+
+	logger.Printf("Broadcast RequestVote: New view: %d, Candidate ID: %d\n", pRV.NewView, pRV.CandidateID)
+
+	broadcastNewView := false
+
+	for rid, client := range lbbft.nodes {
+		if rid != lbbft.Config.ID {
+			go func(cli *proto.LBBFTClient) {
+				pRVReply, err := (*cli).RequestVote(context.TODO(), pRV)
+				util.PanicErr(err)
+				lbbft.Mut.Lock()
+				if !broadcastNewView {
+					rvqc.Sigs = append(rvqc.Sigs, pRVReply.Sig)
+				}
+				if !broadcastNewView && len(rvqc.Sigs) >= int(lbbft.Q) && lbbft.SigCache.VerifyQuorumCert(rvqc.Proto2QuorumCert()) {
+					pNV := &proto.NewViewArgs{
+						NewView:     pRV.NewView,
+						CandidateID: lbbft.ID,
+						NewViewCert: rvqc,
+					}
+					broadcastNewView = true
+
+					lbbft.View = pRV.NewView
+					lbbft.Leader = lbbft.ID
+					lbbft.IsLeader = true
+
+					lbbft.Mut.Unlock()
+					lbbft.ViewChangeChan <- struct{}{}
+					lbbft.BroadcastNewView(pNV)
+
+				} else {
+					lbbft.Mut.Unlock()
+				}
+			}(client)
+		}
+	}
+}
+
+func (lbbft *LBBFT) BroadcastNewView(pNV *proto.NewViewArgs) {
+	logger.Printf("Broadcast NewView: NewView: %d, CandidateID: %d \n", pNV.NewView, pNV.CandidateID)
+	for rid, client := range lbbft.nodes {
+		if rid != lbbft.Config.ID {
+			go func(cli *proto.LBBFTClient) {
+				_, err := (*cli).NewView(context.TODO(), pNV)
+				util.PanicErr(err)
+			}(client)
+		}
+	}
+}
+
+func (lbbft *LBBFT) RequestVote(_ context.Context, pRV *proto.RequestVoteArgs) (*proto.RequestVoteReply, error) {
+	logger.Printf("Receive RequestVote: new view: %d\n", pRV.NewView)
+
+	if pRV.NewView >= lbbft.View &&
+		lbbft.LastPreparedID.IsOlderOrEqual(&data.EntryID{V: pRV.LastPreparedView, N: pRV.LastPreparedSeq}) &&
+		lbbft.IsRequestVotePreparedCertValid(pRV) {
+
+		ps, _ := lbbft.CreateRequestVoteReplySig(pRV)
+
+		return &proto.RequestVoteReply{Sig: ps}, nil
+	}
+
+	return &proto.RequestVoteReply{}, nil
+}
+
+func (lbbft *LBBFT) NewView(_ context.Context, pNV *proto.NewViewArgs) (*proto.NewViewReply, error) {
+	logger.Printf("Receive NewView: new view: %d\n", pNV.NewView)
+
+	if pNV.NewView >= lbbft.View &&
+		lbbft.IsNewViewCertValid(pNV) {
+		lbbft.Mut.Lock()
+
+		lbbft.View = pNV.NewView
+		lbbft.Leader = pNV.CandidateID
+		lbbft.IsLeader = false
+
+		lbbft.Mut.Unlock()
+		logger.Printf("enter new view: %d\n", pNV.NewView)
+		lbbft.ViewChangeChan <- struct{}{}
+
+		return &proto.NewViewReply{
+			View: lbbft.LastPreparedID.V,
+			Seq:  lbbft.LastPreparedID.N,
+		}, nil
+	}
+
+	return &proto.NewViewReply{}, nil // ^uint32(0)表示不接受NewView
 }
 
 func newLBBFTServer(lbbft *LBBFT) *lbbftServer {
