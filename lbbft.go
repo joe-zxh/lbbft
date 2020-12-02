@@ -549,6 +549,7 @@ func (lbbft *LBBFT) BroadcastRequestVote(pRV *proto.RequestVoteArgs, rvqc *proto
 					lbbft.View = pRV.NewView
 					lbbft.Leader = lbbft.ID
 					lbbft.IsLeader = true
+					lbbft.VoteFor[pRV.NewView] = lbbft.ID
 
 					lbbft.Mut.Unlock()
 					lbbft.ViewChangeChan <- struct{}{}
@@ -577,7 +578,9 @@ func (lbbft *LBBFT) BroadcastNewView(pNV *proto.NewViewArgs) {
 func (lbbft *LBBFT) RequestVote(_ context.Context, pRV *proto.RequestVoteArgs) (*proto.RequestVoteReply, error) {
 	logger.Printf("Receive RequestVote: new view: %d\n", pRV.NewView)
 
-	if pRV.NewView >= lbbft.View &&
+	_, ok := lbbft.VoteFor[pRV.NewView]
+
+	if !ok && pRV.NewView > lbbft.View &&
 		lbbft.LastPreparedID.IsOlderOrEqual(&data.EntryID{V: pRV.LastPreparedView, N: pRV.LastPreparedSeq}) &&
 		lbbft.IsRequestVotePreparedCertValid(pRV) {
 
@@ -592,13 +595,17 @@ func (lbbft *LBBFT) RequestVote(_ context.Context, pRV *proto.RequestVoteArgs) (
 func (lbbft *LBBFT) NewView(_ context.Context, pNV *proto.NewViewArgs) (*proto.NewViewReply, error) {
 	logger.Printf("Receive NewView: new view: %d\n", pNV.NewView)
 
-	if pNV.NewView >= lbbft.View &&
+	_, ok := lbbft.VoteFor[pNV.NewView]
+
+	if !ok && pNV.NewView > lbbft.View &&
 		lbbft.IsNewViewCertValid(pNV) {
 		lbbft.Mut.Lock()
 
 		lbbft.View = pNV.NewView
 		lbbft.Leader = pNV.CandidateID
 		lbbft.IsLeader = false
+
+		lbbft.VoteFor[pNV.NewView] = pNV.CandidateID
 
 		lbbft.Mut.Unlock()
 		logger.Printf("enter new view: %d\n", pNV.NewView)
@@ -610,7 +617,7 @@ func (lbbft *LBBFT) NewView(_ context.Context, pNV *proto.NewViewArgs) (*proto.N
 		}, nil
 	}
 
-	return &proto.NewViewReply{}, nil // ^uint32(0)表示不接受NewView
+	return &proto.NewViewReply{View: ^uint32(0), Seq: ^uint32(0)}, nil // ^uint32(0)表示不接受NewView
 }
 
 func newLBBFTServer(lbbft *LBBFT) *lbbftServer {

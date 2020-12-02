@@ -52,7 +52,6 @@ type LBBFTCore struct {
 	LastPreparedID        data.EntryID
 	UpdateLastPreparedMut sync.Mutex
 
-	// Log        map[data.EntryID]*data.Entry // bycon的log是一个数组，因为需要保证连续，leader可以处理log inconsistency，而pbft不需要。client只有执行完上一条指令后，才会发送下一条请求，所以顺序 并没有问题。
 	cps       map[int]*CheckPoint
 	WaterLow  uint32
 	WaterHigh uint32
@@ -71,6 +70,7 @@ type LBBFTCore struct {
 
 	waitEntry      *sync.Cond
 	ViewChangeChan chan struct{}
+	VoteFor        map[uint32]uint32 // key: view  value: nodeID
 }
 
 func (lbbft *LBBFTCore) AddCommand(command data.Command) {
@@ -151,6 +151,7 @@ func New(conf *config.ReplicaConfig) *LBBFTCore {
 
 		LastPreparedID: data.EntryID{V: 0, N: 0},
 		ViewChangeChan: make(chan struct{}, 1),
+		VoteFor:        make(map[uint32]uint32),
 	}
 
 	lbbft.InitLog()

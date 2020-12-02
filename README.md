@@ -23,3 +23,8 @@ To start the client, run `cmd/pbftclient/pbftclient`.
 [1] Castro, Miguel, and Barbara Liskov. "Practical Byzantine fault tolerance." OSDI. Vol. 99. No. 1999. 1999.
 
 [2] Tormod Erevik Lea, Leander Jehl, and Hein Meling. Towards New Abstractions for Implementing Quorum-based Systems. In 37th International Conference on Distributed Computing Systems (ICDCS), Jun 2017.
+
+## grpc error排查
+1. 有返回值的rpc，不能直接返回nil。
+2. rpc的输入参数，发送的时候，注意不要修改。
+
