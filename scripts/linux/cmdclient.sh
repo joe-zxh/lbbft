@@ -11,7 +11,7 @@ calCPU() {
 
 if [ $# -lt 3 ]
 then
-    echo "请输入至少3个参数: 1: 算法的名字  2: 集群的大小  3: 使用的CPU个数(0表示不使用taskset) 4: payload的大小(默认是200) 5: 客户端个数(默认是10000) 6: 运行时间(默认是60s)"
+    echo "请输入至少3个参数: 1: 算法的名字  2: 集群的大小  3: 使用的CPU个数(0表示不使用taskset) 4: payload的大小(默认是300) 5: 客户端个数(默认是10000) 6: 运行时间(默认是60s)"
     echo "例如: ./cmdclient.sh pbft 4 15 200 10000 60"
     exit
 fi
@@ -27,7 +27,7 @@ then
     clientNum=$5
     runTime=$6
 else    
-    payloadSize=200
+    payloadSize=300
     clientNum=10000
     runTime=60
 fi

@@ -336,10 +336,10 @@ func (lbbft *LBBFT) BroadcastPrepareRequest(pP *proto.PrepareArgs, ent *data.Ent
 							Seq:  ent.PP.Seq,
 							QC:   proto.QuorumCertToProto(ent.CommittedCert),
 						}
-						lbbft.BroadcastCommitRequest(pC)
 
 						ent.Mut.Unlock()
-						go lbbft.ApplyCommands(pC.Seq)
+						go lbbft.BroadcastCommitRequest(pC)
+						lbbft.ApplyCommands(pC.Seq)
 					} else {
 						ent.Mut.Unlock()
 					}

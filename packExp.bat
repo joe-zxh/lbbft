@@ -45,6 +45,7 @@ if "%1%"=="Linux" (
     copy .\pbft\scripts\run_pbft_server.bat .\%dirName%\scripts
     copy .\pbftlinear\scripts\run_pbftlinear_server.bat .\%dirName%\scripts
     copy .\lbbft\scripts\run_lbbft_server.bat .\%dirName%\scripts
+    copy .\bycon\scripts\run_bycon_server.bat .\%dirName%\scripts
 )
 
 echo øΩ±¥keys
@@ -100,14 +101,34 @@ echo ±‡“Îlbbft...
 cd .\lbbft
 del .\lbbftserver%exeSuffix% 
 del .\lbbftclient%exeSuffix% 
+del .\lbbftvcclient%exeSuffix% 
 go build -o .\lbbftserver%exeSuffix% .\cmd\lbbftserver\main.go
 go build -o .\lbbftclient%exeSuffix% .\cmd\lbbftclient\main.go
+go build -o .\lbbftvcclient%exeSuffix% .\cmd\lbbftvcclient\main.go
 cd ..
 
 echo øΩ±¥lbbft...
 copy .\lbbft\lbbftserver%exeSuffix% .\%dirName%
 copy .\lbbft\lbbftclient%exeSuffix% .\%dirName%
+copy .\lbbft\lbbftvcclient%exeSuffix% .\%dirName%
 copy .\lbbft\lbbft.toml .\%dirName%
+
+
+echo ±‡“Îbycon...
+cd .\bycon
+del .\byconserver%exeSuffix% 
+del .\byconclient%exeSuffix% 
+del .\byconvcclient%exeSuffix% 
+go build -o .\byconserver%exeSuffix% .\cmd\byconserver\main.go
+go build -o .\byconclient%exeSuffix% .\cmd\byconclient\main.go
+go build -o .\byconvcclient%exeSuffix% .\cmd\byconvcclient\main.go
+cd ..
+
+echo øΩ±¥bycon...
+copy .\bycon\byconserver%exeSuffix% .\%dirName%
+copy .\bycon\byconclient%exeSuffix% .\%dirName%
+copy .\bycon\byconvcclient%exeSuffix% .\%dirName%
+copy .\bycon\bycon.toml .\%dirName%
 
 
 echo %dirName%.zip...
