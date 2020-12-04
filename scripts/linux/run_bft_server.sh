@@ -26,7 +26,7 @@ trap 'trap - SIGTERM && kill -- -$$' SIGINT SIGTERM EXIT
 # 启动程序
 for((i=1;i<=$clusterSize;i++));  
 do
-    $bin --tls=true --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize --batch-size 30  >> $log_dir/$i.out 2>&1 "$@" &
+    $bin --tls=true --self-id $i --privkey keys/r$i.key --cluster-size $clusterSize --batch-size 1 "$@" >> $log_dir/$i.out 2>&1 &
     echo $!
     if [ $i -eq 1 ]; then
         leaderpid=$!

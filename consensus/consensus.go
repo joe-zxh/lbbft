@@ -257,7 +257,7 @@ func (lbbft *LBBFTCore) UpdateLastPreparedID(ent *data.Entry) {
 
 func (lbbft *LBBFTCore) IsRequestVotePreparedCertValid(pRV *proto.RequestVoteArgs) bool {
 
-	if !lbbft.SigCache.VerifyQuorumCert(pRV.PreparedCert.Proto2QuorumCert()) {
+	if !lbbft.SigCache.VerifyQuorumCertWithoutCache(pRV.PreparedCert.Proto2QuorumCert()) {
 		return false
 	}
 
@@ -290,7 +290,7 @@ func (lbbft *LBBFTCore) IsRequestVotePreparedCertValid(pRV *proto.RequestVoteArg
 
 func (lbbft *LBBFTCore) IsNewViewCertValid(pNV *proto.NewViewArgs) bool {
 
-	if !lbbft.SigCache.VerifyQuorumCert(pNV.NewViewCert.Proto2QuorumCert()) {
+	if !lbbft.SigCache.VerifyQuorumCertWithoutCache(pNV.NewViewCert.Proto2QuorumCert()) {
 		log.Println(`VerifyQuorumCert failed...`)
 		return false
 	}
@@ -318,6 +318,12 @@ func (lbbft *LBBFTCore) IsNewViewCertValid(pNV *proto.NewViewArgs) bool {
 
 // return sig, sigcontent
 func (lbbft *LBBFTCore) CreateRequestVoteReplySig(pRV *proto.RequestVoteArgs) (*proto.PartialSig, *([]byte)) {
+
+	//return &proto.PartialSig{
+	//	ReplicaID: 0,
+	//	R:         pRV.Digest,
+	//	S:         pRV.Digest,
+	//}, &pRV.Digest
 
 	s512 := sha512.New()
 

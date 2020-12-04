@@ -77,6 +77,15 @@ func (s *SignatureCache) VerifySignature(sig PartialSig, hash EntryHash) bool {
 	return valid
 }
 
+func (s *SignatureCache) VerifySignatureWithoutCache(sig PartialSig, hash EntryHash) bool {
+	info, ok := s.conf.Replicas[sig.ID]
+	if !ok {
+		return false
+	}
+	valid := ecdsa.Verify(info.PubKey, hash[:], sig.R, sig.S)
+	return valid
+}
+
 // VerifyQuorumCert verifies a quorum certificate
 func (s *SignatureCache) VerifyQuorumCert(qc *QuorumCert) bool {
 	if len(qc.Sigs) < s.conf.QuorumSize {
@@ -102,6 +111,18 @@ func (s *SignatureCache) VerifyQuorumCert(qc *QuorumCert) bool {
 	//}
 	//wg.Wait()
 	//return numVerified >= uint64(s.conf.QuorumSize)
+}
+
+// VerifyQuorumCert verifies a quorum certificate
+func (s *SignatureCache) VerifyQuorumCertWithoutCache(qc *QuorumCert) bool {
+	if len(qc.Sigs) < s.conf.QuorumSize {
+		return false
+	}
+	//****
+	for _, psig := range qc.Sigs { // 因为需要深度拷贝，所以用range的方式来做，只检查第一个即可。
+		return s.VerifySignatureWithoutCache(psig, qc.SigContent)
+	}
+	return true
 }
 
 // todo: commit的时候，记得移除cache
