@@ -535,7 +535,7 @@ func (lbbft *LBBFT) BroadcastRequestVote(pRV *proto.RequestVoteArgs, rvqc *proto
 				pRVReply, err := (*cli).RequestVote(context.TODO(), pRV)
 				util.PanicErr(err)
 				lbbft.Mut.Lock()
-				if !broadcastNewView {
+				if !broadcastNewView && pRVReply.Sig != nil {
 					rvqc.Sigs = append(rvqc.Sigs, pRVReply.Sig)
 				}
 				if !broadcastNewView && len(rvqc.Sigs) >= int(lbbft.Q) && lbbft.SigCache.VerifyQuorumCert(rvqc.Proto2QuorumCert()) {

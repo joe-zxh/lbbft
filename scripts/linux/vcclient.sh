@@ -22,7 +22,7 @@ clusterSize=$2
 cpuPer=$3
 prepareNum=$4
 
-if [ $# -eq 5 ]
+if [ $# -ge 5 ]
 then
     viewchangeNum=$5
 else    
