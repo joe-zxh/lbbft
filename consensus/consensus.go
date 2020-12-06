@@ -340,3 +340,12 @@ func (lbbft *LBBFTCore) CreateRequestVoteReplySig(pRV *proto.RequestVoteArgs) (*
 	util.PanicErr(err)
 	return proto.PartialSig2Proto(ps), &sum
 }
+
+func (lbbft *LBBFTCore) RemoveVoteFor() {
+	var reserveNum uint32 = 5
+	for view, _ := range lbbft.VoteFor {
+		if view <= lbbft.View-reserveNum {
+			delete(lbbft.VoteFor, view)
+		}
+	}
+}

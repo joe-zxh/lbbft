@@ -606,6 +606,7 @@ func (lbbft *LBBFT) NewView(_ context.Context, pNV *proto.NewViewArgs) (*proto.N
 		lbbft.IsLeader = false
 
 		lbbft.VoteFor[pNV.NewView] = pNV.CandidateID
+		lbbft.RemoveVoteFor()
 
 		lbbft.Mut.Unlock()
 		logger.Printf("enter new view: %d\n", pNV.NewView)
